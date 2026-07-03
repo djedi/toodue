@@ -81,11 +81,12 @@ pub async fn status(
     State(st): State<AppState>,
     AuthUser(user): AuthUser,
 ) -> ApiResult<Json<Value>> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT calendar_id FROM google_accounts WHERE user_id = ?")
-            .bind(user.id)
-            .fetch_optional(&st.db)
-            .await?;
+    let row: Option<(String,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT calendar_id FROM google_accounts WHERE user_id = ?",
+    ))
+    .bind(user.id)
+    .fetch_optional(&st.db.pool)
+    .await?;
     Ok(Json(json!({
         "configured": config().is_some(),
         "connected": row.is_some(),
@@ -209,7 +210,7 @@ pub async fn callback(
         .ok_or_else(|| ApiError::internal(format!("could not create calendar: {cal}")))?
         .to_string();
 
-    sqlx::query(
+    sqlx::query(&*crate::db::sql(
         "INSERT INTO google_accounts (user_id, access_token, refresh_token, token_expires_at, calendar_id, time_zone) \
          VALUES (?, ?, ?, ?, ?, ?) \
          ON CONFLICT(user_id) DO UPDATE SET \
@@ -217,14 +218,14 @@ pub async fn callback(
            token_expires_at = excluded.token_expires_at, calendar_id = excluded.calendar_id, \
            time_zone = excluded.time_zone, channel_id = NULL, resource_id = NULL, \
            channel_expires_at = NULL, sync_token = NULL",
-    )
+    ))
     .bind(user_id)
     .bind(&access)
     .bind(&refresh)
     .bind(&expires_at)
     .bind(&calendar_id)
     .bind(&tz)
-    .execute(&st.db)
+    .execute(&st.db.pool)
     .await?;
 
     let st2 = st.clone();
@@ -245,11 +246,11 @@ pub async fn callback(
 
 /// Best-effort removal of the user's channel and TooDue calendar at Google.
 async fn teardown(st: &AppState, user_id: i64) -> GRes<()> {
-    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(&*crate::db::sql(
         "SELECT calendar_id, channel_id, resource_id FROM google_accounts WHERE user_id = ?",
-    )
+    ))
     .bind(user_id)
-    .fetch_optional(&st.db)
+    .fetch_optional(&st.db.pool)
     .await
     .map_err(estr)?;
     let Some((calendar_id, channel_id, resource_id)) = row else {
@@ -281,14 +282,18 @@ pub async fn disconnect(
     AuthUser(user): AuthUser,
 ) -> ApiResult<Json<Value>> {
     let _ = teardown(&st, user.id).await;
-    sqlx::query("DELETE FROM gcal_events WHERE user_id = ?")
-        .bind(user.id)
-        .execute(&st.db)
-        .await?;
-    sqlx::query("DELETE FROM google_accounts WHERE user_id = ?")
-        .bind(user.id)
-        .execute(&st.db)
-        .await?;
+    sqlx::query(&*crate::db::sql(
+        "DELETE FROM gcal_events WHERE user_id = ?",
+    ))
+    .bind(user.id)
+    .execute(&st.db.pool)
+    .await?;
+    sqlx::query(&*crate::db::sql(
+        "DELETE FROM google_accounts WHERE user_id = ?",
+    ))
+    .bind(user.id)
+    .execute(&st.db.pool)
+    .await?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -296,12 +301,12 @@ pub async fn disconnect(
 
 /// Returns a valid (access_token, calendar_id, time_zone), refreshing if needed.
 async fn access_token(st: &AppState, user_id: i64) -> GRes<(String, String, String)> {
-    let row: Option<(String, String, String, String, String)> = sqlx::query_as(
+    let row: Option<(String, String, String, String, String)> = sqlx::query_as(&*crate::db::sql(
         "SELECT access_token, refresh_token, token_expires_at, calendar_id, time_zone \
          FROM google_accounts WHERE user_id = ?",
-    )
+    ))
     .bind(user_id)
-    .fetch_optional(&st.db)
+    .fetch_optional(&st.db.pool)
     .await
     .map_err(estr)?;
     let (access, refresh, expires, cal, tz) = row.ok_or("not connected")?;
@@ -329,13 +334,13 @@ async fn access_token(st: &AppState, user_id: i64) -> GRes<(String, String, Stri
         .ok_or_else(|| format!("token refresh failed: {resp}"))?
         .to_string();
     let new_expires = iso_in(resp["expires_in"].as_i64().unwrap_or(3600) - 60);
-    sqlx::query(
+    sqlx::query(&*crate::db::sql(
         "UPDATE google_accounts SET access_token = ?, token_expires_at = ? WHERE user_id = ?",
-    )
+    ))
     .bind(&access)
     .bind(&new_expires)
     .bind(user_id)
-    .execute(&st.db)
+    .execute(&st.db.pool)
     .await
     .map_err(estr)?;
     Ok((access, cal, tz))
@@ -372,13 +377,14 @@ fn event_body(task: &Task, tz: &str) -> GRes<Value> {
 async fn upsert_event(st: &AppState, user_id: i64, task: &Task) -> GRes<()> {
     let (token, cal, tz) = access_token(st, user_id).await?;
     let body = event_body(task, &tz)?;
-    let existing: Option<(String,)> =
-        sqlx::query_as("SELECT event_id FROM gcal_events WHERE user_id = ? AND task_id = ?")
-            .bind(user_id)
-            .bind(task.id)
-            .fetch_optional(&st.db)
-            .await
-            .map_err(estr)?;
+    let existing: Option<(String,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT event_id FROM gcal_events WHERE user_id = ? AND task_id = ?",
+    ))
+    .bind(user_id)
+    .bind(task.id)
+    .fetch_optional(&st.db.pool)
+    .await
+    .map_err(estr)?;
     if let Some((event_id,)) = existing {
         let resp = st
             .http
@@ -411,24 +417,27 @@ async fn upsert_event(st: &AppState, user_id: i64, task: &Task) -> GRes<()> {
     }
     let v: Value = resp.json().await.map_err(estr)?;
     let event_id = v["id"].as_str().ok_or("event insert returned no id")?;
-    sqlx::query("INSERT OR REPLACE INTO gcal_events (user_id, task_id, event_id) VALUES (?, ?, ?)")
-        .bind(user_id)
-        .bind(task.id)
-        .bind(event_id)
-        .execute(&st.db)
-        .await
-        .map_err(estr)?;
+    sqlx::query(&*crate::db::sql(
+        "INSERT OR REPLACE INTO gcal_events (user_id, task_id, event_id) VALUES (?, ?, ?)",
+    ))
+    .bind(user_id)
+    .bind(task.id)
+    .bind(event_id)
+    .execute(&st.db.pool)
+    .await
+    .map_err(estr)?;
     Ok(())
 }
 
 async fn delete_event(st: &AppState, user_id: i64, task_id: i64) -> GRes<()> {
-    let existing: Option<(String,)> =
-        sqlx::query_as("SELECT event_id FROM gcal_events WHERE user_id = ? AND task_id = ?")
-            .bind(user_id)
-            .bind(task_id)
-            .fetch_optional(&st.db)
-            .await
-            .map_err(estr)?;
+    let existing: Option<(String,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT event_id FROM gcal_events WHERE user_id = ? AND task_id = ?",
+    ))
+    .bind(user_id)
+    .bind(task_id)
+    .fetch_optional(&st.db.pool)
+    .await
+    .map_err(estr)?;
     if let Some((event_id,)) = existing {
         if let Ok((token, cal, _)) = access_token(st, user_id).await {
             let _ = st
@@ -442,12 +451,14 @@ async fn delete_event(st: &AppState, user_id: i64, task_id: i64) -> GRes<()> {
                 .send()
                 .await;
         }
-        sqlx::query("DELETE FROM gcal_events WHERE user_id = ? AND task_id = ?")
-            .bind(user_id)
-            .bind(task_id)
-            .execute(&st.db)
-            .await
-            .map_err(estr)?;
+        sqlx::query(&*crate::db::sql(
+            "DELETE FROM gcal_events WHERE user_id = ? AND task_id = ?",
+        ))
+        .bind(user_id)
+        .bind(task_id)
+        .execute(&st.db.pool)
+        .await
+        .map_err(estr)?;
     }
     Ok(())
 }
@@ -457,9 +468,9 @@ async fn delete_event(st: &AppState, user_id: i64, task_id: i64) -> GRes<()> {
 /// against the mapping table.
 async fn task_sync(st: &AppState, task_id: i64) -> GRes<()> {
     let sql = format!("SELECT {TASK_COLS} FROM tasks t WHERE t.id = ?");
-    let task = sqlx::query_as::<_, Task>(&sql)
+    let task = sqlx::query_as::<_, Task>(&*crate::db::sql(&sql))
         .bind(task_id)
-        .fetch_optional(&st.db)
+        .fetch_optional(&st.db.pool)
         .await
         .map_err(estr)?;
 
@@ -469,7 +480,7 @@ async fn task_sync(st: &AppState, task_id: i64) -> GRes<()> {
                  JOIN project_members m ON m.user_id = ga.user_id WHERE m.project_id = ?",
         )
         .bind(t.project_id)
-        .fetch_all(&st.db)
+        .fetch_all(&st.db.pool)
         .await
         .map_err(estr)?
         .into_iter()
@@ -478,11 +489,13 @@ async fn task_sync(st: &AppState, task_id: i64) -> GRes<()> {
         _ => Vec::new(),
     };
 
-    let mapped: Vec<(i64,)> = sqlx::query_as("SELECT user_id FROM gcal_events WHERE task_id = ?")
-        .bind(task_id)
-        .fetch_all(&st.db)
-        .await
-        .map_err(estr)?;
+    let mapped: Vec<(i64,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT user_id FROM gcal_events WHERE task_id = ?",
+    ))
+    .bind(task_id)
+    .fetch_all(&st.db.pool)
+    .await
+    .map_err(estr)?;
     for (uid,) in &mapped {
         if !desired_users.contains(uid) {
             if let Err(e) = delete_event(st, *uid, task_id).await {
@@ -519,12 +532,13 @@ pub fn spawn_project_sync(st: &AppState, project_id: i64) {
     }
     let st = st.clone();
     tokio::spawn(async move {
-        let ids: Vec<(i64,)> =
-            sqlx::query_as("SELECT id FROM tasks WHERE project_id = ? AND due_date IS NOT NULL")
-                .bind(project_id)
-                .fetch_all(&st.db)
-                .await
-                .unwrap_or_default();
+        let ids: Vec<(i64,)> = sqlx::query_as(&*crate::db::sql(
+            "SELECT id FROM tasks WHERE project_id = ? AND due_date IS NOT NULL",
+        ))
+        .bind(project_id)
+        .fetch_all(&st.db.pool)
+        .await
+        .unwrap_or_default();
         for (id,) in ids {
             if let Err(e) = task_sync(&st, id).await {
                 tracing::warn!("gcal sync task {id}: {e}");
@@ -540,10 +554,10 @@ pub fn spawn_orphan_cleanup(st: &AppState) {
     }
     let st = st.clone();
     tokio::spawn(async move {
-        let ids: Vec<(i64,)> = sqlx::query_as(
+        let ids: Vec<(i64,)> = sqlx::query_as(&*crate::db::sql(
             "SELECT DISTINCT task_id FROM gcal_events WHERE task_id NOT IN (SELECT id FROM tasks)",
-        )
-        .fetch_all(&st.db)
+        ))
+        .fetch_all(&st.db.pool)
         .await
         .unwrap_or_default();
         for (id,) in ids {
@@ -571,18 +585,20 @@ async fn full_sync(st: &AppState, user_id: i64) -> GRes<()> {
         "SELECT {TASK_COLS} FROM tasks t WHERE t.completed_at IS NULL AND t.due_date IS NOT NULL \
          AND t.project_id IN (SELECT project_id FROM project_members WHERE user_id = ?)"
     );
-    let tasks = sqlx::query_as::<_, Task>(&sql)
+    let tasks = sqlx::query_as::<_, Task>(&*crate::db::sql(&sql))
         .bind(user_id)
-        .fetch_all(&st.db)
+        .fetch_all(&st.db.pool)
         .await
         .map_err(estr)?;
     let desired: HashSet<i64> = tasks.iter().map(|t| t.id).collect();
 
-    let mapped: Vec<(i64,)> = sqlx::query_as("SELECT task_id FROM gcal_events WHERE user_id = ?")
-        .bind(user_id)
-        .fetch_all(&st.db)
-        .await
-        .map_err(estr)?;
+    let mapped: Vec<(i64,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT task_id FROM gcal_events WHERE user_id = ?",
+    ))
+    .bind(user_id)
+    .fetch_all(&st.db.pool)
+    .await
+    .map_err(estr)?;
     for (tid,) in mapped {
         if !desired.contains(&tid) {
             let _ = delete_event(st, user_id, tid).await;
@@ -633,14 +649,14 @@ async fn start_watch(st: &AppState, user_id: i64) -> GRes<()> {
         .or_else(|| resp["expiration"].as_i64())
         .and_then(chrono::DateTime::from_timestamp_millis)
         .map(|d| d.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string());
-    sqlx::query(
+    sqlx::query(&*crate::db::sql(
         "UPDATE google_accounts SET channel_id = ?, resource_id = ?, channel_expires_at = ? WHERE user_id = ?",
-    )
+    ))
     .bind(&channel_id)
     .bind(resource_id)
     .bind(&expires)
     .bind(user_id)
-    .execute(&st.db)
+    .execute(&st.db.pool)
     .await
     .map_err(estr)?;
     Ok(())
@@ -673,12 +689,14 @@ async fn prime_sync_token(st: &AppState, user_id: i64) -> GRes<()> {
             continue;
         }
         let sync = v["nextSyncToken"].as_str().ok_or("no sync token")?;
-        sqlx::query("UPDATE google_accounts SET sync_token = ? WHERE user_id = ?")
-            .bind(sync)
-            .bind(user_id)
-            .execute(&st.db)
-            .await
-            .map_err(estr)?;
+        sqlx::query(&*crate::db::sql(
+            "UPDATE google_accounts SET sync_token = ? WHERE user_id = ?",
+        ))
+        .bind(sync)
+        .bind(user_id)
+        .execute(&st.db.pool)
+        .await
+        .map_err(estr)?;
         return Ok(());
     }
 }
@@ -697,13 +715,14 @@ pub async fn webhook(State(st): State<AppState>, headers: HeaderMap) -> StatusCo
     if channel.is_empty() || resource_state == "sync" {
         return StatusCode::OK;
     }
-    let row: Option<(i64,)> =
-        sqlx::query_as("SELECT user_id FROM google_accounts WHERE channel_id = ?")
-            .bind(&channel)
-            .fetch_optional(&st.db)
-            .await
-            .ok()
-            .flatten();
+    let row: Option<(i64,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT user_id FROM google_accounts WHERE channel_id = ?",
+    ))
+    .bind(&channel)
+    .fetch_optional(&st.db.pool)
+    .await
+    .ok()
+    .flatten();
     if let Some((user_id,)) = row {
         let st = st.clone();
         tokio::spawn(async move {
@@ -717,13 +736,14 @@ pub async fn webhook(State(st): State<AppState>, headers: HeaderMap) -> StatusCo
 
 async fn incremental_sync(st: &AppState, user_id: i64) -> GRes<()> {
     let (token, cal, _) = access_token(st, user_id).await?;
-    let (sync_token,): (Option<String>,) =
-        sqlx::query_as("SELECT sync_token FROM google_accounts WHERE user_id = ?")
-            .bind(user_id)
-            .fetch_optional(&st.db)
-            .await
-            .map_err(estr)?
-            .ok_or("not connected")?;
+    let (sync_token,): (Option<String>,) = sqlx::query_as(&*crate::db::sql(
+        "SELECT sync_token FROM google_accounts WHERE user_id = ?",
+    ))
+    .bind(user_id)
+    .fetch_optional(&st.db.pool)
+    .await
+    .map_err(estr)?
+    .ok_or("not connected")?;
     let Some(sync) = sync_token else {
         return prime_sync_token(st, user_id).await;
     };
@@ -748,11 +768,13 @@ async fn incremental_sync(st: &AppState, user_id: i64) -> GRes<()> {
             .map_err(estr)?;
         if resp.status().as_u16() == 410 {
             // Sync token expired; re-prime and catch changes on the next ping.
-            sqlx::query("UPDATE google_accounts SET sync_token = NULL WHERE user_id = ?")
-                .bind(user_id)
-                .execute(&st.db)
-                .await
-                .map_err(estr)?;
+            sqlx::query(&*crate::db::sql(
+                "UPDATE google_accounts SET sync_token = NULL WHERE user_id = ?",
+            ))
+            .bind(user_id)
+            .execute(&st.db.pool)
+            .await
+            .map_err(estr)?;
             return prime_sync_token(st, user_id).await;
         }
         let v: Value = resp.json().await.map_err(estr)?;
@@ -767,12 +789,14 @@ async fn incremental_sync(st: &AppState, user_id: i64) -> GRes<()> {
             continue;
         }
         if let Some(ns) = v["nextSyncToken"].as_str() {
-            sqlx::query("UPDATE google_accounts SET sync_token = ? WHERE user_id = ?")
-                .bind(ns)
-                .bind(user_id)
-                .execute(&st.db)
-                .await
-                .map_err(estr)?;
+            sqlx::query(&*crate::db::sql(
+                "UPDATE google_accounts SET sync_token = ? WHERE user_id = ?",
+            ))
+            .bind(ns)
+            .bind(user_id)
+            .execute(&st.db.pool)
+            .await
+            .map_err(estr)?;
         }
         return Ok(());
     }
@@ -790,21 +814,22 @@ async fn apply_event(st: &AppState, user_id: i64, ev: &Value) -> GRes<()> {
         return Ok(()); // not one of ours
     };
     let sql = format!("SELECT {TASK_COLS} FROM tasks t WHERE t.id = ?");
-    let Some(task) = sqlx::query_as::<_, Task>(&sql)
+    let Some(task) = sqlx::query_as::<_, Task>(&*crate::db::sql(&sql))
         .bind(task_id)
-        .fetch_optional(&st.db)
+        .fetch_optional(&st.db.pool)
         .await
         .map_err(estr)?
     else {
         return Ok(());
     };
-    let member: Option<(i64,)> =
-        sqlx::query_as("SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?")
-            .bind(task.project_id)
-            .bind(user_id)
-            .fetch_optional(&st.db)
-            .await
-            .map_err(estr)?;
+    let member: Option<(i64,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?",
+    ))
+    .bind(task.project_id)
+    .bind(user_id)
+    .fetch_optional(&st.db.pool)
+    .await
+    .map_err(estr)?;
     if member.is_none() {
         return Ok(());
     }
@@ -826,21 +851,23 @@ async fn apply_event(st: &AppState, user_id: i64, ev: &Value) -> GRes<()> {
     }
 
     let now = now_iso();
-    sqlx::query("UPDATE tasks SET due_date = ?, due_time = ?, updated_at = ? WHERE id = ?")
-        .bind(&new_date)
-        .bind(&new_time)
-        .bind(&now)
-        .bind(task_id)
-        .execute(&st.db)
-        .await
-        .map_err(estr)?;
+    sqlx::query(&*crate::db::sql(
+        "UPDATE tasks SET due_date = ?, due_time = ?, updated_at = ? WHERE id = ?",
+    ))
+    .bind(&new_date)
+    .bind(&new_time)
+    .bind(&now)
+    .bind(task_id)
+    .execute(&st.db.pool)
+    .await
+    .map_err(estr)?;
 
-    let fresh = sqlx::query_as::<_, Task>(&sql)
+    let fresh = sqlx::query_as::<_, Task>(&*crate::db::sql(&sql))
         .bind(task_id)
-        .fetch_one(&st.db)
+        .fetch_one(&st.db.pool)
         .await
         .map_err(estr)?;
-    let recipients = project_recipients(&st.db, fresh.project_id).await;
+    let recipients = project_recipients(&st.db.pool, fresh.project_id).await;
     st.hub.publish(
         recipients,
         "task.upsert",
@@ -859,11 +886,12 @@ pub async fn renew_channels(st: &AppState) {
     if config().is_none() {
         return;
     }
-    let rows: Vec<(i64, Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT user_id, channel_expires_at, sync_token FROM google_accounts")
-            .fetch_all(&st.db)
-            .await
-            .unwrap_or_default();
+    let rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT user_id, channel_expires_at, sync_token FROM google_accounts",
+    ))
+    .fetch_all(&st.db.pool)
+    .await
+    .unwrap_or_default();
     for (user_id, expires, sync_token) in rows {
         let needs_renewal = expires.map(|e| e < iso_in(24 * 3600)).unwrap_or(true);
         if needs_renewal {

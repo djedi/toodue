@@ -4,7 +4,7 @@ use axum::extract::{Multipart, State};
 use axum::Json;
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Utc};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
@@ -113,26 +113,27 @@ fn project_name_from_filename(filename: &str) -> String {
 }
 
 async fn find_or_create_project(
-    db: &SqlitePool,
+    db: &AnyPool,
     user_id: i64,
     name: &str,
     created: &mut usize,
 ) -> ApiResult<i64> {
     // Todoist's Inbox maps onto the TooDue inbox.
     if name == "Inbox" {
-        let row: Option<(i64,)> =
-            sqlx::query_as("SELECT id FROM projects WHERE owner_id = ? AND is_inbox = 1")
-                .bind(user_id)
-                .fetch_optional(db)
-                .await?;
+        let row: Option<(i64,)> = sqlx::query_as(&*crate::db::sql(
+            "SELECT id FROM projects WHERE owner_id = ? AND is_inbox = 1",
+        ))
+        .bind(user_id)
+        .fetch_optional(db)
+        .await?;
         if let Some((id,)) = row {
             return Ok(id);
         }
     }
     // Re-importing reuses a same-named project instead of duplicating it.
-    let row: Option<(i64,)> = sqlx::query_as(
+    let row: Option<(i64,)> = sqlx::query_as(&*crate::db::sql(
         "SELECT id FROM projects WHERE owner_id = ? AND is_inbox = 0 AND name = ? LIMIT 1",
-    )
+    ))
     .bind(user_id)
     .bind(name)
     .fetch_optional(db)
@@ -140,20 +141,21 @@ async fn find_or_create_project(
     if let Some((id,)) = row {
         return Ok(id);
     }
-    let id = sqlx::query(
+    let (id,): (i64,) = sqlx::query_as(&*crate::db::sql(
         "INSERT INTO projects (name, color, owner_id, sort_order) \
-         VALUES (?, 'slate', ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM projects))",
-    )
+         VALUES (?, 'slate', ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM projects)) RETURNING id",
+    ))
     .bind(name)
     .bind(user_id)
+    .fetch_one(db)
+    .await?;
+    sqlx::query(&*crate::db::sql(
+        "INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')",
+    ))
+    .bind(id)
+    .bind(user_id)
     .execute(db)
-    .await?
-    .last_insert_rowid();
-    sqlx::query("INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')")
-        .bind(id)
-        .bind(user_id)
-        .execute(db)
-        .await?;
+    .await?;
     *created += 1;
     Ok(id)
 }
@@ -236,14 +238,15 @@ pub async fn todoist(
         let c_deadline = col("DEADLINE");
 
         let project_id =
-            find_or_create_project(&st.db, user.id, &project_name, &mut projects_created).await?;
+            find_or_create_project(&st.db.pool, user.id, &project_name, &mut projects_created)
+                .await?;
         touched_projects.push(project_id);
 
         let mut sort_order: i64 = sqlx::query_as::<_, (i64,)>(
             "SELECT COALESCE(MAX(sort_order), 0) FROM tasks WHERE project_id = ?",
         )
         .bind(project_id)
-        .fetch_one(&st.db)
+        .fetch_one(&st.db.pool)
         .await?
         .0;
         let mut last_top_task: Option<i64> = None;
@@ -269,11 +272,11 @@ pub async fn todoist(
                     // the nearest top-level task so nothing gets hidden.
                     let parent_id = if indent > 1 { last_top_task } else { None };
                     sort_order += 1;
-                    let id = sqlx::query(
+                    let (id,): (i64,) = sqlx::query_as(&*crate::db::sql(
                         "INSERT INTO tasks (project_id, parent_id, creator_id, name, description, \
                          due_date, due_time, deadline, priority, sort_order) \
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    )
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    ))
                     .bind(project_id)
                     .bind(parent_id)
                     .bind(user.id)
@@ -284,9 +287,8 @@ pub async fn todoist(
                     .bind(&deadline.date)
                     .bind(priority)
                     .bind(sort_order)
-                    .execute(&st.db)
-                    .await?
-                    .last_insert_rowid();
+                    .fetch_one(&st.db.pool)
+                    .await?;
                     tasks += 1;
                     if indent <= 1 {
                         last_top_task = Some(id);
@@ -297,13 +299,13 @@ pub async fn todoist(
                     // Notes follow the task they belong to and become comments.
                     if let Some(task_id) = last_task {
                         if !content.is_empty() {
-                            sqlx::query(
+                            sqlx::query(&*crate::db::sql(
                                 "INSERT INTO comments (task_id, user_id, body) VALUES (?, ?, ?)",
-                            )
+                            ))
                             .bind(task_id)
                             .bind(user.id)
                             .bind(content)
-                            .execute(&st.db)
+                            .execute(&st.db.pool)
                             .await?;
                             comments += 1;
                         }
@@ -318,7 +320,7 @@ pub async fn todoist(
     touched_projects.sort_unstable();
     touched_projects.dedup();
     for pid in &touched_projects {
-        if let Ok(v) = project_json(&st.db, *pid).await {
+        if let Ok(v) = project_json(&st.db.pool, *pid).await {
             st.hub.publish(vec![user.id], "project.upsert", v);
         }
     }

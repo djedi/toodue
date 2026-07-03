@@ -75,20 +75,21 @@ struct IcsTask {
 
 pub async fn feed(State(st): State<AppState>, Path(token): Path<String>) -> ApiResult<Response> {
     let token = token.trim_end_matches(".ics");
-    let user: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE ics_token = ?")
-        .bind(token)
-        .fetch_optional(&st.db)
-        .await?;
+    let user: Option<(i64,)> =
+        sqlx::query_as(&*crate::db::sql("SELECT id FROM users WHERE ics_token = ?"))
+            .bind(token)
+            .fetch_optional(&st.db.pool)
+            .await?;
     let (user_id,) = user.ok_or_else(ApiError::not_found)?;
 
-    let tasks = sqlx::query_as::<_, IcsTask>(
+    let tasks = sqlx::query_as::<_, IcsTask>(&*crate::db::sql(
         "SELECT t.id, t.name, t.description, t.due_date, t.due_time, t.deadline FROM tasks t \
          WHERE t.completed_at IS NULL \
            AND (t.due_date IS NOT NULL OR t.deadline IS NOT NULL) \
            AND t.project_id IN (SELECT project_id FROM project_members WHERE user_id = ?)",
-    )
+    ))
     .bind(user_id)
-    .fetch_all(&st.db)
+    .fetch_all(&st.db.pool)
     .await?;
 
     let stamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
@@ -124,10 +125,11 @@ pub async fn my_url(
     State(st): State<AppState>,
     AuthUser(user): AuthUser,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let (token,): (String,) = sqlx::query_as("SELECT ics_token FROM users WHERE id = ?")
-        .bind(user.id)
-        .fetch_one(&st.db)
-        .await?;
+    let (token,): (String,) =
+        sqlx::query_as(&*crate::db::sql("SELECT ics_token FROM users WHERE id = ?"))
+            .bind(user.id)
+            .fetch_one(&st.db.pool)
+            .await?;
     Ok(Json(json!({ "url": format!("/api/calendar/{token}.ics") })))
 }
 
@@ -136,10 +138,12 @@ pub async fn rotate(
     AuthUser(user): AuthUser,
 ) -> ApiResult<Json<serde_json::Value>> {
     let token = random_token();
-    sqlx::query("UPDATE users SET ics_token = ? WHERE id = ?")
-        .bind(&token)
-        .bind(user.id)
-        .execute(&st.db)
-        .await?;
+    sqlx::query(&*crate::db::sql(
+        "UPDATE users SET ics_token = ? WHERE id = ?",
+    ))
+    .bind(&token)
+    .bind(user.id)
+    .execute(&st.db.pool)
+    .await?;
     Ok(Json(json!({ "url": format!("/api/calendar/{token}.ics") })))
 }

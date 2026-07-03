@@ -72,14 +72,14 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let st = AppState::from_ref(state);
         let token = cookie_token(&parts.headers).ok_or_else(ApiError::unauthorized)?;
-        let user = sqlx::query_as::<_, User>(
+        let user = sqlx::query_as::<_, User>(&*crate::db::sql(
             "SELECT u.id, u.email, u.name FROM sessions s \
              JOIN users u ON u.id = s.user_id \
              WHERE s.token = ? AND s.expires_at > ?",
-        )
+        ))
         .bind(&token)
         .bind(now_iso())
-        .fetch_optional(&st.db)
+        .fetch_optional(&st.db.pool)
         .await?
         .ok_or_else(ApiError::unauthorized)?;
         Ok(AuthUser(user))
@@ -97,19 +97,21 @@ where
         let st = AppState::from_ref(state);
         let token = bearer_token(&parts.headers).ok_or_else(ApiError::unauthorized)?;
         let token_hash = hash_token(&token);
-        let user = sqlx::query_as::<_, User>(
+        let user = sqlx::query_as::<_, User>(&*crate::db::sql(
             "SELECT u.id, u.email, u.name FROM api_keys k \
              JOIN users u ON u.id = k.user_id WHERE k.token_hash = ?",
-        )
+        ))
         .bind(&token_hash)
-        .fetch_optional(&st.db)
+        .fetch_optional(&st.db.pool)
         .await?
         .ok_or_else(ApiError::unauthorized)?;
-        sqlx::query("UPDATE api_keys SET last_used_at = ? WHERE token_hash = ?")
-            .bind(now_iso())
-            .bind(&token_hash)
-            .execute(&st.db)
-            .await?;
+        sqlx::query(&*crate::db::sql(
+            "UPDATE api_keys SET last_used_at = ? WHERE token_hash = ?",
+        ))
+        .bind(now_iso())
+        .bind(&token_hash)
+        .execute(&st.db.pool)
+        .await?;
         Ok(ApiUser(user))
     }
 }
@@ -121,16 +123,20 @@ async fn start_session(st: &AppState, user_id: i64) -> ApiResult<SessionResponse
     let expires = (Utc::now() + Duration::days(SESSION_DAYS))
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
-    sqlx::query("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)")
-        .bind(&token)
-        .bind(user_id)
-        .bind(&expires)
-        .execute(&st.db)
-        .await?;
-    let user = sqlx::query_as::<_, User>("SELECT id, email, name FROM users WHERE id = ?")
-        .bind(user_id)
-        .fetch_one(&st.db)
-        .await?;
+    sqlx::query(&*crate::db::sql(
+        "INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
+    ))
+    .bind(&token)
+    .bind(user_id)
+    .bind(&expires)
+    .execute(&st.db.pool)
+    .await?;
+    let user = sqlx::query_as::<_, User>(&*crate::db::sql(
+        "SELECT id, email, name FROM users WHERE id = ?",
+    ))
+    .bind(user_id)
+    .fetch_one(&st.db.pool)
+    .await?;
     let cookie = format!(
         "{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         SESSION_DAYS * 24 * 3600
@@ -161,10 +167,11 @@ pub async fn register(
             "password must be at least 8 characters",
         ));
     }
-    let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE email = ?")
-        .bind(&email)
-        .fetch_optional(&st.db)
-        .await?;
+    let existing: Option<(i64,)> =
+        sqlx::query_as(&*crate::db::sql("SELECT id FROM users WHERE email = ?"))
+            .bind(&email)
+            .fetch_optional(&st.db.pool)
+            .await?;
     if existing.is_some() {
         return Err(ApiError::bad_request(
             "an account with that email already exists",
@@ -177,29 +184,29 @@ pub async fn register(
         .map_err(|_| ApiError::internal("could not hash password"))?
         .to_string();
 
-    let user_id = sqlx::query(
-        "INSERT INTO users (email, name, password_hash, ics_token) VALUES (?, ?, ?, ?)",
-    )
+    let (user_id,): (i64,) = sqlx::query_as(&*crate::db::sql(
+        "INSERT INTO users (email, name, password_hash, ics_token) VALUES (?, ?, ?, ?) RETURNING id",
+    ))
     .bind(&email)
     .bind(&name)
     .bind(&hash)
     .bind(random_token())
-    .execute(&st.db)
-    .await?
-    .last_insert_rowid();
+    .fetch_one(&st.db.pool)
+    .await?;
 
-    let project_id = sqlx::query(
-        "INSERT INTO projects (name, color, owner_id, is_inbox) VALUES ('Inbox', 'slate', ?, 1)",
-    )
+    let (project_id,): (i64,) = sqlx::query_as(&*crate::db::sql(
+        "INSERT INTO projects (name, color, owner_id, is_inbox) VALUES ('Inbox', 'slate', ?, 1) RETURNING id",
+    ))
     .bind(user_id)
-    .execute(&st.db)
-    .await?
-    .last_insert_rowid();
-    sqlx::query("INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')")
-        .bind(project_id)
-        .bind(user_id)
-        .execute(&st.db)
-        .await?;
+    .fetch_one(&st.db.pool)
+    .await?;
+    sqlx::query(&*crate::db::sql(
+        "INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')",
+    ))
+    .bind(project_id)
+    .bind(user_id)
+    .execute(&st.db.pool)
+    .await?;
 
     start_session(&st, user_id).await
 }
@@ -215,11 +222,12 @@ pub async fn login(
     Json(b): Json<LoginBody>,
 ) -> ApiResult<SessionResponse> {
     let email = b.email.trim().to_lowercase();
-    let row: Option<(i64, String)> =
-        sqlx::query_as("SELECT id, password_hash FROM users WHERE email = ?")
-            .bind(&email)
-            .fetch_optional(&st.db)
-            .await?;
+    let row: Option<(i64, String)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT id, password_hash FROM users WHERE email = ?",
+    ))
+    .bind(&email)
+    .fetch_optional(&st.db.pool)
+    .await?;
     let (user_id, hash) = row.ok_or_else(|| ApiError::bad_request("invalid email or password"))?;
     let parsed =
         PasswordHash::new(&hash).map_err(|_| ApiError::internal("corrupt password hash"))?;
@@ -234,9 +242,9 @@ pub async fn logout(
     headers: HeaderMap,
 ) -> ApiResult<AppendHeaders<[(HeaderName, String); 1]>> {
     if let Some(token) = cookie_token(&headers) {
-        sqlx::query("DELETE FROM sessions WHERE token = ?")
+        sqlx::query(&*crate::db::sql("DELETE FROM sessions WHERE token = ?"))
             .bind(&token)
-            .execute(&st.db)
+            .execute(&st.db.pool)
             .await?;
     }
     let cookie = format!("{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");

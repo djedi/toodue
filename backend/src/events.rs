@@ -63,7 +63,7 @@ pub async fn sse_handler(
     )
 }
 
-pub async fn project_recipients(db: &sqlx::SqlitePool, project_id: i64) -> Vec<i64> {
+pub async fn project_recipients(db: &sqlx::AnyPool, project_id: i64) -> Vec<i64> {
     sqlx::query_as::<_, (i64,)>("SELECT user_id FROM project_members WHERE project_id = ?")
         .bind(project_id)
         .fetch_all(db)

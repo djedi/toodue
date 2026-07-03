@@ -26,32 +26,33 @@ pub async fn create(
     if body.is_empty() {
         return Err(ApiError::bad_request("comment cannot be empty"));
     }
-    let task = fetch_task(&st.db, task_id).await?;
-    require_member(&st.db, user.id, task.project_id).await?;
+    let task = fetch_task(&st.db.pool, task_id).await?;
+    require_member(&st.db.pool, user.id, task.project_id).await?;
 
-    let id = sqlx::query("INSERT INTO comments (task_id, user_id, body) VALUES (?, ?, ?)")
-        .bind(task_id)
-        .bind(user.id)
-        .bind(&body)
-        .execute(&st.db)
-        .await?
-        .last_insert_rowid();
-
-    let comment = sqlx::query_as::<_, Comment>(
-        "SELECT c.id, c.task_id, c.user_id, u.name AS user_name, c.body, c.created_at \
-         FROM comments c JOIN users u ON u.id = c.user_id WHERE c.id = ?",
-    )
-    .bind(id)
-    .fetch_one(&st.db)
+    let (id,): (i64,) = sqlx::query_as(&*crate::db::sql(
+        "INSERT INTO comments (task_id, user_id, body) VALUES (?, ?, ?) RETURNING id",
+    ))
+    .bind(task_id)
+    .bind(user.id)
+    .bind(&body)
+    .fetch_one(&st.db.pool)
     .await?;
 
-    let recipients = project_recipients(&st.db, task.project_id).await;
+    let comment = sqlx::query_as::<_, Comment>(&*crate::db::sql(
+        "SELECT c.id, c.task_id, c.user_id, u.name AS user_name, c.body, c.created_at \
+         FROM comments c JOIN users u ON u.id = c.user_id WHERE c.id = ?",
+    ))
+    .bind(id)
+    .fetch_one(&st.db.pool)
+    .await?;
+
+    let recipients = project_recipients(&st.db.pool, task.project_id).await;
     st.hub.publish(
         recipients.clone(),
         "comment.new",
         serde_json::to_value(&comment).unwrap(),
     );
-    if let Ok(fresh) = fetch_task(&st.db, task_id).await {
+    if let Ok(fresh) = fetch_task(&st.db.pool, task_id).await {
         st.hub.publish(
             recipients,
             "task.upsert",
@@ -66,28 +67,29 @@ pub async fn remove(
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
-    let row: Option<(i64, i64)> =
-        sqlx::query_as("SELECT user_id, task_id FROM comments WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&st.db)
-            .await?;
+    let row: Option<(i64, i64)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT user_id, task_id FROM comments WHERE id = ?",
+    ))
+    .bind(id)
+    .fetch_optional(&st.db.pool)
+    .await?;
     let (author_id, task_id) = row.ok_or_else(ApiError::not_found)?;
     if author_id != user.id {
         return Err(ApiError::forbidden());
     }
-    let task = fetch_task(&st.db, task_id).await?;
-    sqlx::query("DELETE FROM comments WHERE id = ?")
+    let task = fetch_task(&st.db.pool, task_id).await?;
+    sqlx::query(&*crate::db::sql("DELETE FROM comments WHERE id = ?"))
         .bind(id)
-        .execute(&st.db)
+        .execute(&st.db.pool)
         .await?;
 
-    let recipients = project_recipients(&st.db, task.project_id).await;
+    let recipients = project_recipients(&st.db.pool, task.project_id).await;
     st.hub.publish(
         recipients.clone(),
         "comment.remove",
         json!({ "id": id, "task_id": task_id }),
     );
-    if let Ok(fresh) = fetch_task(&st.db, task_id).await {
+    if let Ok(fresh) = fetch_task(&st.db.pool, task_id).await {
         st.hub.publish(
             recipients,
             "task.upsert",

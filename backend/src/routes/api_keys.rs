@@ -30,11 +30,11 @@ pub async fn list(
     State(st): State<AppState>,
     AuthUser(user): AuthUser,
 ) -> ApiResult<Json<Vec<ApiKeyInfo>>> {
-    let keys = sqlx::query_as::<_, ApiKeyInfo>(
+    let keys = sqlx::query_as::<_, ApiKeyInfo>(&*crate::db::sql(
         "SELECT id, name, prefix, last_used_at, created_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
-    )
+    ))
     .bind(user.id)
-    .fetch_all(&st.db)
+    .fetch_all(&st.db.pool)
     .await?;
     Ok(Json(keys))
 }
@@ -51,21 +51,21 @@ pub async fn create(
     let key = format!("tdue_{}", random_token());
     let prefix = key.chars().take(12).collect::<String>();
     let token_hash = hash_token(&key);
-    let id =
-        sqlx::query("INSERT INTO api_keys (user_id, name, prefix, token_hash) VALUES (?, ?, ?, ?)")
-            .bind(user.id)
-            .bind(name)
-            .bind(&prefix)
-            .bind(&token_hash)
-            .execute(&st.db)
-            .await?
-            .last_insert_rowid();
-    let api_key = sqlx::query_as::<_, ApiKeyInfo>(
+    let (id,): (i64,) = sqlx::query_as(&*crate::db::sql(
+        "INSERT INTO api_keys (user_id, name, prefix, token_hash) VALUES (?, ?, ?, ?) RETURNING id",
+    ))
+    .bind(user.id)
+    .bind(name)
+    .bind(&prefix)
+    .bind(&token_hash)
+    .fetch_one(&st.db.pool)
+    .await?;
+    let api_key = sqlx::query_as::<_, ApiKeyInfo>(&*crate::db::sql(
         "SELECT id, name, prefix, last_used_at, created_at FROM api_keys WHERE id = ? AND user_id = ?",
-    )
+    ))
     .bind(id)
     .bind(user.id)
-    .fetch_one(&st.db)
+    .fetch_one(&st.db.pool)
     .await?;
     Ok(Json(CreatedApiKey { api_key, key }))
 }
@@ -75,11 +75,13 @@ pub async fn remove(
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let result = sqlx::query("DELETE FROM api_keys WHERE id = ? AND user_id = ?")
-        .bind(id)
-        .bind(user.id)
-        .execute(&st.db)
-        .await?;
+    let result = sqlx::query(&*crate::db::sql(
+        "DELETE FROM api_keys WHERE id = ? AND user_id = ?",
+    ))
+    .bind(id)
+    .bind(user.id)
+    .execute(&st.db.pool)
+    .await?;
     if result.rows_affected() == 0 {
         return Err(ApiError::not_found());
     }

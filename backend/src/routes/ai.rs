@@ -85,12 +85,12 @@ pub async fn search_tasks(
          ORDER BY t.updated_at DESC LIMIT ?"
     );
     let pattern = format!("%{needle}%");
-    let tasks = sqlx::query_as::<_, Task>(&sql)
+    let tasks = sqlx::query_as::<_, Task>(&*crate::db::sql(&sql))
         .bind(user.id)
         .bind(&pattern)
         .bind(&pattern)
         .bind(q.limit.unwrap_or(25).clamp(1, 100))
-        .fetch_all(&st.db)
+        .fetch_all(&st.db.pool)
         .await?;
     Ok(Json(tasks))
 }
@@ -108,6 +108,6 @@ pub async fn project_detail(
     ApiUser(user): ApiUser,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
-    require_member(&st.db, user.id, id).await?;
-    Ok(Json(project_json(&st.db, id).await?))
+    require_member(&st.db.pool, user.id, id).await?;
+    Ok(Json(project_json(&st.db.pool, id).await?))
 }

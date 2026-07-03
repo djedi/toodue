@@ -19,7 +19,7 @@ use tower_http::trace::TraceLayer;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: sqlx::SqlitePool,
+    pub db: db::Database,
     pub hub: events::Hub,
     pub data_dir: PathBuf,
     pub http: reqwest::Client,

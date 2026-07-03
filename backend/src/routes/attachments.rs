@@ -12,14 +12,15 @@ use crate::routes::projects::require_member;
 use crate::routes::tasks::fetch_task;
 use crate::AppState;
 
-async fn fetch_attachment(db: &sqlx::SqlitePool, id: i64) -> ApiResult<(Attachment, String)> {
-    let row: Option<(i64, i64, i64, String, String, String, i64, String)> = sqlx::query_as(
-        "SELECT id, task_id, user_id, filename, stored_name, mime, size, created_at \
+async fn fetch_attachment(db: &sqlx::AnyPool, id: i64) -> ApiResult<(Attachment, String)> {
+    let row: Option<(i64, i64, i64, String, String, String, i64, String)> =
+        sqlx::query_as(&*crate::db::sql(
+            "SELECT id, task_id, user_id, filename, stored_name, mime, size, created_at \
          FROM attachments WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(db)
-    .await?;
+        ))
+        .bind(id)
+        .fetch_optional(db)
+        .await?;
     let (id, task_id, user_id, filename, stored_name, mime, size, created_at) =
         row.ok_or_else(ApiError::not_found)?;
     Ok((
@@ -37,8 +38,8 @@ async fn fetch_attachment(db: &sqlx::SqlitePool, id: i64) -> ApiResult<(Attachme
 }
 
 async fn publish_attachment_change(st: &AppState, task_id: i64) {
-    if let Ok(task) = fetch_task(&st.db, task_id).await {
-        let recipients = project_recipients(&st.db, task.project_id).await;
+    if let Ok(task) = fetch_task(&st.db.pool, task_id).await {
+        let recipients = project_recipients(&st.db.pool, task.project_id).await;
         st.hub.publish(
             recipients,
             "task.upsert",
@@ -53,8 +54,8 @@ pub async fn upload(
     Path(task_id): Path<i64>,
     mut multipart: Multipart,
 ) -> ApiResult<Json<Attachment>> {
-    let task = fetch_task(&st.db, task_id).await?;
-    require_member(&st.db, user.id, task.project_id).await?;
+    let task = fetch_task(&st.db.pool, task_id).await?;
+    require_member(&st.db.pool, user.id, task.project_id).await?;
 
     while let Some(field) = multipart
         .next_field()
@@ -77,22 +78,21 @@ pub async fn upload(
         let stored_name = random_token();
         tokio::fs::write(st.data_dir.join("attachments").join(&stored_name), &data).await?;
 
-        let id = sqlx::query(
+        let (id,): (i64,) = sqlx::query_as(&*crate::db::sql(
             "INSERT INTO attachments (task_id, user_id, filename, stored_name, mime, size) \
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
+             VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+        ))
         .bind(task_id)
         .bind(user.id)
         .bind(&filename)
         .bind(&stored_name)
         .bind(&mime)
         .bind(data.len() as i64)
-        .execute(&st.db)
-        .await?
-        .last_insert_rowid();
+        .fetch_one(&st.db.pool)
+        .await?;
 
-        let (attachment, _) = fetch_attachment(&st.db, id).await?;
-        let recipients = project_recipients(&st.db, task.project_id).await;
+        let (attachment, _) = fetch_attachment(&st.db.pool, id).await?;
+        let recipients = project_recipients(&st.db.pool, task.project_id).await;
         st.hub.publish(
             recipients,
             "attachment.new",
@@ -111,9 +111,9 @@ pub async fn download(
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> ApiResult<Response> {
-    let (attachment, stored_name) = fetch_attachment(&st.db, id).await?;
-    let task = fetch_task(&st.db, attachment.task_id).await?;
-    require_member(&st.db, user.id, task.project_id).await?;
+    let (attachment, stored_name) = fetch_attachment(&st.db.pool, id).await?;
+    let task = fetch_task(&st.db.pool, attachment.task_id).await?;
+    require_member(&st.db.pool, user.id, task.project_id).await?;
 
     let bytes = tokio::fs::read(st.data_dir.join("attachments").join(&stored_name))
         .await
@@ -143,17 +143,17 @@ pub async fn remove(
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
-    let (attachment, stored_name) = fetch_attachment(&st.db, id).await?;
-    let task = fetch_task(&st.db, attachment.task_id).await?;
-    require_member(&st.db, user.id, task.project_id).await?;
+    let (attachment, stored_name) = fetch_attachment(&st.db.pool, id).await?;
+    let task = fetch_task(&st.db.pool, attachment.task_id).await?;
+    require_member(&st.db.pool, user.id, task.project_id).await?;
 
-    sqlx::query("DELETE FROM attachments WHERE id = ?")
+    sqlx::query(&*crate::db::sql("DELETE FROM attachments WHERE id = ?"))
         .bind(id)
-        .execute(&st.db)
+        .execute(&st.db.pool)
         .await?;
     let _ = tokio::fs::remove_file(st.data_dir.join("attachments").join(&stored_name)).await;
 
-    let recipients = project_recipients(&st.db, task.project_id).await;
+    let recipients = project_recipients(&st.db.pool, task.project_id).await;
     st.hub.publish(
         recipients,
         "attachment.remove",
