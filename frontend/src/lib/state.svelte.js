@@ -12,6 +12,7 @@ export const ui = $state({
   projectId: null,
   openTaskId: null,
   quickAdd: null, // null or { project_id?, due_date?, parent_id? }
+  showSettings: false,
   toast: null,
   theme: 'system'
 });
@@ -58,8 +59,12 @@ export function syncRoute() {
   if (parts[0] === 'project' && parts[1]) {
     ui.view = 'project';
     ui.projectId = Number(parts[1]);
-  } else if (['inbox', 'today', 'upcoming', 'browse'].includes(parts[0])) {
+  } else if (['inbox', 'today', 'upcoming', 'projects'].includes(parts[0])) {
     ui.view = parts[0];
+    ui.projectId = null;
+  } else if (parts[0] === 'browse') {
+    // Old name for the Projects tab; keep bookmarks working.
+    ui.view = 'projects';
     ui.projectId = null;
   } else {
     ui.view = 'today';
@@ -155,7 +160,7 @@ function handleEvent({ type, data: d }) {
     case 'project.remove':
       data.projects = data.projects.filter((p) => p.id !== d.id);
       data.tasks = data.tasks.filter((t) => t.project_id !== d.id);
-      if (ui.view === 'project' && ui.projectId === d.id) navigate('browse');
+      if (ui.view === 'project' && ui.projectId === d.id) navigate('projects');
       break;
   }
 }
@@ -220,7 +225,7 @@ export async function deleteProject(id) {
   await api.del(`/projects/${id}`);
   data.projects = data.projects.filter((p) => p.id !== id);
   data.tasks = data.tasks.filter((t) => t.project_id !== id);
-  if (ui.view === 'project' && ui.projectId === id) navigate('browse');
+  if (ui.view === 'project' && ui.projectId === id) navigate('projects');
 }
 
 export async function shareProject(id, email) {
@@ -234,7 +239,7 @@ export async function removeMember(projectId, userId) {
   if (userId === data.user.id) {
     data.projects = data.projects.filter((x) => x.id !== projectId);
     data.tasks = data.tasks.filter((t) => t.project_id !== projectId);
-    if (ui.view === 'project' && ui.projectId === projectId) navigate('browse');
+    if (ui.view === 'project' && ui.projectId === projectId) navigate('projects');
   } else {
     upsert(data.projects, p);
   }

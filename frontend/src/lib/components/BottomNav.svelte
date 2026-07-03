@@ -7,7 +7,7 @@
     { view: 'inbox', label: 'Inbox', icon: Inbox },
     { view: 'today', label: 'Today', icon: CalendarCheck },
     { view: 'upcoming', label: 'Upcoming', icon: CalendarDays },
-    { view: 'browse', label: 'Browse', icon: LayoutGrid }
+    { view: 'projects', label: 'Projects', icon: LayoutGrid }
   ];
 
   const counts = $derived({

@@ -1,15 +1,6 @@
 <script>
-  import {
-    data,
-    ui,
-    navigate,
-    inboxProject,
-    signOut,
-    addProject,
-    toast
-  } from '../state.svelte.js';
+  import { data, ui, navigate, inboxProject, addProject, toast } from '../state.svelte.js';
   import { todayStr } from '../dates.js';
-  import ThemeSwitcher from './ThemeSwitcher.svelte';
   import {
     CircleCheckBig,
     Inbox,
@@ -18,7 +9,7 @@
     Plus,
     Hash,
     Users,
-    LogOut,
+    Settings,
     ChevronRight
   } from '@lucide/svelte';
 
@@ -168,13 +159,12 @@
       {data.user.name.slice(0, 1).toUpperCase()}
     </div>
     <span class="min-w-0 flex-1 truncate text-sm font-medium">{data.user.name}</span>
-    <ThemeSwitcher compact />
     <button
-      aria-label="Log out"
-      onclick={signOut}
+      aria-label="Settings"
+      onclick={() => (ui.showSettings = true)}
       class="rounded p-1.5 text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-600 dark:hover:bg-zinc-800"
     >
-      <LogOut size={16} />
+      <Settings size={17} />
     </button>
   </div>
 </aside>

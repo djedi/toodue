@@ -5,7 +5,7 @@ real-time sync over SSE.
 
 ## Features
 
-- **Inbox / Today / Upcoming / Browse** — the four tabs you expect, responsive from phone to desktop
+- **Inbox / Today / Upcoming / Projects** — the four tabs you expect, responsive from phone to desktop
 - **Full task model** — name, description, date + time, deadline, priority (P1–P4), project,
   sub-tasks, comments, and file attachments
 - **Nested projects** and project sharing: invite another TooDue user by email and stay in sync
@@ -69,7 +69,7 @@ disable response buffering for `/api/events` if your proxy buffers by default).
 
 ## Calendar integration
 
-Browse → Settings → **Calendar feed** copies your personal iCal URL. Subscribe to it:
+Settings (the gear icon) → **Calendar feed** copies your personal iCal URL. Subscribe to it:
 
 - **Google Calendar**: Settings → Add calendar → From URL
 - **Fantastical**: File → New Calendar Subscription
