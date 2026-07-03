@@ -42,6 +42,14 @@ make prod-build
 make prod-run    # http://localhost:8080, data in the `toodue-data` volume
 ```
 
+Or run the production Compose stack:
+
+```sh
+cp .env.prod.example .env.prod
+# Edit TOODUE_PORT/BIND_ADDR if your reverse proxy runs in Docker and needs host reachability.
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+```
+
 Or with the image directly:
 
 ```sh

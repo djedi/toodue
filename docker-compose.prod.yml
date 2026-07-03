@@ -1,0 +1,20 @@
+services:
+  toodue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: toodue:latest
+    container_name: toodue
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      STATIC_DIR: /srv/static
+      PORT: "8080"
+      RUST_LOG: ${RUST_LOG:-toodue=info,tower_http=info}
+    volumes:
+      - toodue-data:/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${TOODUE_PORT:-8527}:8080"
+
+volumes:
+  toodue-data:
