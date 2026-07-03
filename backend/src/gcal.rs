@@ -107,10 +107,11 @@ pub async fn connect(State(st): State<AppState>, AuthUser(user): AuthUser) -> Ap
     let url = format!(
         "https://accounts.google.com/o/oauth2/v2/auth\
          ?client_id={}&redirect_uri={}&response_type=code&scope={}\
-         &access_type=offline&prompt=consent&state={state_token}",
+         &access_type=offline&prompt={}&state={state_token}",
         urlencode(&cfg.client_id),
         urlencode(&redirect_uri),
         urlencode("https://www.googleapis.com/auth/calendar"),
+        urlencode("select_account consent"),
     );
     Ok(Redirect::temporary(&url))
 }
