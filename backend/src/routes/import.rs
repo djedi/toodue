@@ -31,25 +31,37 @@ fn parse_todoist_date(raw: &str, today: NaiveDate) -> ParsedDate {
         return ParsedDate::default();
     }
     if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return ParsedDate { date: Some(d.to_string()), ..Default::default() };
+        return ParsedDate {
+            date: Some(d.to_string()),
+            ..Default::default()
+        };
     }
     let lower = s.to_lowercase();
     if lower.starts_with("every") {
         // Recurrence isn't supported; schedule the next occurrence for
         // day-of-month rules ("every 27th") and leave the rest undated.
         let day = lower.split_whitespace().find_map(|t| {
-            t.trim_end_matches(|c: char| c.is_alphabetic()).parse::<u32>().ok()
+            t.trim_end_matches(|c: char| c.is_alphabetic())
+                .parse::<u32>()
+                .ok()
         });
         if let Some(day) = day {
             let mut d = today;
             for _ in 0..62 {
                 if d.day() == day {
-                    return ParsedDate { date: Some(d.to_string()), time: None, recurring: true };
+                    return ParsedDate {
+                        date: Some(d.to_string()),
+                        time: None,
+                        recurring: true,
+                    };
                 }
                 d += Duration::days(1);
             }
         }
-        return ParsedDate { recurring: true, ..Default::default() };
+        return ParsedDate {
+            recurring: true,
+            ..Default::default()
+        };
     }
 
     let (mut month, mut day, mut year, mut time) = (None, None, None, None);
@@ -80,7 +92,11 @@ fn parse_todoist_date(raw: &str, today: NaiveDate) -> ParsedDate {
     }
     if let (Some(m), Some(d)) = (month, day) {
         if let Some(nd) = NaiveDate::from_ymd_opt(year.unwrap_or(today.year()), m, d) {
-            return ParsedDate { date: Some(nd.to_string()), time, recurring: false };
+            return ParsedDate {
+                date: Some(nd.to_string()),
+                time,
+                recurring: false,
+            };
         }
     }
     ParsedDate::default()
@@ -163,7 +179,8 @@ pub async fn todoist(
             break;
         }
     }
-    let bytes = bytes.ok_or_else(|| ApiError::bad_request("expected a multipart field named \"file\""))?;
+    let bytes =
+        bytes.ok_or_else(|| ApiError::bad_request("expected a multipart field named \"file\""))?;
 
     // Extract everything up front: ZipFile is not Send, so it can't be held
     // across the database awaits below.
@@ -222,12 +239,13 @@ pub async fn todoist(
             find_or_create_project(&st.db, user.id, &project_name, &mut projects_created).await?;
         touched_projects.push(project_id);
 
-        let mut sort_order: i64 =
-            sqlx::query_as::<_, (i64,)>("SELECT COALESCE(MAX(sort_order), 0) FROM tasks WHERE project_id = ?")
-                .bind(project_id)
-                .fetch_one(&st.db)
-                .await?
-                .0;
+        let mut sort_order: i64 = sqlx::query_as::<_, (i64,)>(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM tasks WHERE project_id = ?",
+        )
+        .bind(project_id)
+        .fetch_one(&st.db)
+        .await?
+        .0;
         let mut last_top_task: Option<i64> = None;
         let mut last_task: Option<i64> = None;
 
@@ -279,12 +297,14 @@ pub async fn todoist(
                     // Notes follow the task they belong to and become comments.
                     if let Some(task_id) = last_task {
                         if !content.is_empty() {
-                            sqlx::query("INSERT INTO comments (task_id, user_id, body) VALUES (?, ?, ?)")
-                                .bind(task_id)
-                                .bind(user.id)
-                                .bind(content)
-                                .execute(&st.db)
-                                .await?;
+                            sqlx::query(
+                                "INSERT INTO comments (task_id, user_id, body) VALUES (?, ?, ?)",
+                            )
+                            .bind(task_id)
+                            .bind(user.id)
+                            .bind(content)
+                            .execute(&st.db)
+                            .await?;
                             comments += 1;
                         }
                     }
@@ -303,6 +323,7 @@ pub async fn todoist(
         }
     }
     st.hub.publish(vec![user.id], "tasks.refresh", json!({}));
+    crate::gcal::spawn_full_sync(&st, user.id);
 
     Ok(Json(json!({
         "projects": touched_projects.len(),

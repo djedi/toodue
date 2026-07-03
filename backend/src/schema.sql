@@ -68,6 +68,31 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS google_accounts (
+  user_id            INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  access_token       TEXT NOT NULL,
+  refresh_token      TEXT NOT NULL,
+  token_expires_at   TEXT NOT NULL,
+  calendar_id        TEXT NOT NULL,
+  time_zone          TEXT NOT NULL DEFAULT 'UTC',
+  channel_id         TEXT,
+  resource_id        TEXT,
+  channel_expires_at TEXT,
+  sync_token         TEXT,
+  created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- No FK on task_id: mappings must outlive task deletion so the
+-- corresponding calendar events can still be cleaned up afterwards.
+CREATE TABLE IF NOT EXISTS gcal_events (
+  user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  task_id  INTEGER NOT NULL,
+  event_id TEXT NOT NULL,
+  PRIMARY KEY (user_id, task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gcal_events_task ON gcal_events(task_id);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
 CREATE INDEX IF NOT EXISTS idx_members_user ON project_members(user_id);

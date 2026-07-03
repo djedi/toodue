@@ -2,12 +2,14 @@ mod auth;
 mod db;
 mod error;
 mod events;
+mod gcal;
 mod ics;
 mod models;
 mod routes;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};
@@ -20,6 +22,8 @@ pub struct AppState {
     pub db: sqlx::SqlitePool,
     pub hub: events::Hub,
     pub data_dir: PathBuf,
+    pub http: reqwest::Client,
+    pub oauth_states: gcal::OauthStates,
 }
 
 #[tokio::main]
@@ -39,7 +43,21 @@ async fn main() {
         db,
         hub: events::Hub::new(),
         data_dir,
+        http: reqwest::Client::new(),
+        oauth_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
+
+    // Keep Google Calendar watch channels alive and sync tokens primed.
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
+            loop {
+                interval.tick().await;
+                gcal::renew_channels(&st).await;
+            }
+        });
+    }
 
     let api = Router::new()
         .route("/auth/register", post(auth::register))
@@ -86,7 +104,12 @@ async fn main() {
         )
         .route("/events", get(events::sse_handler))
         .route("/calendar/{token}", get(ics::feed))
-        .route("/me/calendar", get(ics::my_url).post(ics::rotate));
+        .route("/me/calendar", get(ics::my_url).post(ics::rotate))
+        .route("/google/status", get(gcal::status))
+        .route("/google/connect", get(gcal::connect))
+        .route("/google/callback", get(gcal::callback))
+        .route("/google/disconnect", post(gcal::disconnect))
+        .route("/google/webhook", post(gcal::webhook));
 
     let static_dir =
         PathBuf::from(std::env::var("STATIC_DIR").unwrap_or_else(|_| "./static".into()));

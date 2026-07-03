@@ -213,6 +213,7 @@ pub async fn create(
             publish_task(&st, &fresh).await;
         }
     }
+    crate::gcal::spawn_task_sync(&st, task.id);
     Ok(Json(task))
 }
 
@@ -339,8 +340,8 @@ pub async fn update(
         st.hub.publish(recipients, "tasks.refresh", json!({}));
     } else {
         publish_task(&st, &task).await;
-        for sid in completed_subtasks {
-            if let Ok(sub) = fetch_task(&st.db, sid).await {
+        for sid in &completed_subtasks {
+            if let Ok(sub) = fetch_task(&st.db, *sid).await {
                 publish_task(&st, &sub).await;
             }
         }
@@ -350,6 +351,20 @@ pub async fn update(
                     publish_task(&st, &parent).await;
                 }
             }
+        }
+    }
+
+    crate::gcal::spawn_task_sync(&st, id);
+    for sid in &completed_subtasks {
+        crate::gcal::spawn_task_sync(&st, *sid);
+    }
+    if moved_from.is_some() {
+        let subs: Vec<(i64,)> = sqlx::query_as("SELECT id FROM tasks WHERE parent_id = ?")
+            .bind(id)
+            .fetch_all(&st.db)
+            .await?;
+        for (sid,) in subs {
+            crate::gcal::spawn_task_sync(&st, sid);
         }
     }
     Ok(Json(task))
@@ -374,5 +389,9 @@ pub async fn remove(
             publish_task(&st, &parent).await;
         }
     }
+    // Removes the deleted task's calendar events, plus any cascade-deleted
+    // subtasks' events.
+    crate::gcal::spawn_task_sync(&st, id);
+    crate::gcal::spawn_orphan_cleanup(&st);
     Ok(Json(json!({ "ok": true })))
 }

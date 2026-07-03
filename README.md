@@ -69,6 +69,18 @@ disable response buffering for `/api/events` if your proxy buffers by default).
 
 ## Calendar integration
 
+### Google Calendar two-way sync
+
+Set `PUBLIC_URL`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` (OAuth web client with
+redirect URI `<PUBLIC_URL>/api/google/callback`), then Settings (the gear icon) →
+**Connect Google Calendar**. TooDue creates a dedicated "TooDue" calendar and mirrors your
+dated tasks into it instantly. Moving or rescheduling an event in Google Calendar updates the
+task's date in TooDue (via a webhook watch channel), and shared-project members each get
+their own synced copy. Date/time changes flow inbound; all other task fields are owned by
+TooDue.
+
+### Read-only iCal feed
+
 Settings (the gear icon) → **Calendar feed** copies your personal iCal URL. Subscribe to it:
 
 - **Google Calendar**: Settings → Add calendar → From URL

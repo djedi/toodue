@@ -230,8 +230,7 @@ pub async fn reorder(
 
     // Cycle check against the proposed parents, falling back to current DB
     // parents for projects outside the payload.
-    let proposed: HashMap<i64, Option<i64>> =
-        b.items.iter().map(|i| (i.id, i.parent_id)).collect();
+    let proposed: HashMap<i64, Option<i64>> = b.items.iter().map(|i| (i.id, i.parent_id)).collect();
     for item in &b.items {
         let mut seen = HashSet::from([item.id]);
         let mut cur = item.parent_id;
@@ -243,15 +242,13 @@ pub async fn reorder(
             }
             cur = match proposed.get(&p) {
                 Some(v) => *v,
-                None => {
-                    sqlx::query_as::<_, (Option<i64>,)>(
-                        "SELECT parent_id FROM projects WHERE id = ?",
-                    )
-                    .bind(p)
-                    .fetch_optional(&st.db)
-                    .await?
-                    .and_then(|r| r.0)
-                }
+                None => sqlx::query_as::<_, (Option<i64>,)>(
+                    "SELECT parent_id FROM projects WHERE id = ?",
+                )
+                .bind(p)
+                .fetch_optional(&st.db)
+                .await?
+                .and_then(|r| r.0),
             };
         }
     }
@@ -301,6 +298,7 @@ pub async fn remove(
         .await?;
     st.hub
         .publish(recipients, "project.remove", json!({ "id": id }));
+    crate::gcal::spawn_orphan_cleanup(&st);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -344,6 +342,7 @@ pub async fn share(
     let v = project_json(&st.db, id).await?;
     let recipients = project_recipients(&st.db, id).await;
     st.hub.publish(recipients, "project.upsert", v.clone());
+    crate::gcal::spawn_project_sync(&st, id);
     Ok(Json(v))
 }
 
@@ -378,5 +377,6 @@ pub async fn remove_member(
     let v = project_json(&st.db, id).await?;
     let recipients = project_recipients(&st.db, id).await;
     st.hub.publish(recipients, "project.upsert", v.clone());
+    crate::gcal::spawn_project_sync(&st, id);
     Ok(Json(v))
 }

@@ -11,6 +11,9 @@ services:
       STATIC_DIR: /srv/static
       PORT: "8080"
       RUST_LOG: ${RUST_LOG:-toodue=info,tower_http=info}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     volumes:
       - toodue-data:/data
     ports:

@@ -2,10 +2,35 @@
   import { api } from '../api.js';
   import { data, ui, refresh, signOut, toast } from '../state.svelte.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
-  import { X, CalendarPlus, Copy, FileUp, ChevronRight, LogOut } from '@lucide/svelte';
+  import {
+    X,
+    CalendarPlus,
+    CalendarSync,
+    Copy,
+    FileUp,
+    ChevronRight,
+    LogOut
+  } from '@lucide/svelte';
 
   let importInput = $state(null);
   let importing = $state(false);
+  let google = $state(null); // { configured, connected }
+
+  $effect(() => {
+    api.get('/google/status').then((g) => (google = g)).catch(() => {});
+  });
+
+  async function disconnectGoogle() {
+    if (!confirm('Disconnect Google Calendar? The TooDue calendar will be removed from your Google account.'))
+      return;
+    try {
+      await api.post('/google/disconnect');
+      google = { ...google, connected: false };
+      toast('Google Calendar disconnected');
+    } catch (err) {
+      toast(err.message);
+    }
+  }
 
   function close() {
     ui.showSettings = false;
@@ -89,12 +114,40 @@
         <ThemeSwitcher />
       </div>
 
+      {#if google?.configured}
+        {#if google.connected}
+          <div class={row}>
+            <CalendarSync size={18} class="text-emerald-600" />
+            <span class="flex-1">
+              <span class="block text-sm font-medium">Google Calendar connected</span>
+              <span class="block text-xs text-zinc-400">
+                Dated tasks sync both ways with your "TooDue" calendar
+              </span>
+            </span>
+            <button onclick={disconnectGoogle} class="text-xs font-medium text-red-600 hover:underline dark:text-red-400">
+              Disconnect
+            </button>
+          </div>
+        {:else}
+          <a href="/api/google/connect" class={row}>
+            <CalendarSync size={18} class="text-zinc-400" />
+            <span class="flex-1">
+              <span class="block text-sm font-medium">Connect Google Calendar</span>
+              <span class="block text-xs text-zinc-400">
+                Two-way sync — move an event in Google and the task's date follows
+              </span>
+            </span>
+            <ChevronRight size={15} class="text-zinc-400" />
+          </a>
+        {/if}
+      {/if}
+
       <button onclick={copyCalendarUrl} class={row}>
         <CalendarPlus size={18} class="text-zinc-400" />
         <span class="flex-1">
-          <span class="block text-sm font-medium">Calendar feed</span>
+          <span class="block text-sm font-medium">Calendar feed (read-only)</span>
           <span class="block text-xs text-zinc-400">
-            Copy an iCal URL for Google Calendar or Fantastical
+            Copy an iCal URL for Fantastical or other calendar apps
           </span>
         </span>
         <Copy size={15} class="text-zinc-400" />
