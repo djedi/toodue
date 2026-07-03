@@ -12,9 +12,83 @@
   import InboxView from './lib/views/Inbox.svelte';
   import ProjectsView from './lib/views/Projects.svelte';
   import ProjectView from './lib/views/Project.svelte';
-  import { Plus, Settings as SettingsIcon } from '@lucide/svelte';
+  import { Plus, RefreshCw, Settings as SettingsIcon } from '@lucide/svelte';
+  import { getPullRefreshState } from './lib/pullRefresh.js';
 
   boot();
+
+  const PULL_REFRESH_THRESHOLD = 72;
+
+  let scrollEl = $state(null);
+  let pullStartY = $state(null);
+  let pullStartX = $state(0);
+  let pullDistance = $state(0);
+  let pullReady = $state(false);
+  let pullReloading = $state(false);
+
+  $effect(() => {
+    if (!scrollEl) return;
+    // iOS only lets us suppress rubber-band overscroll from a non-passive touchmove listener.
+    scrollEl.addEventListener('touchmove', movePullRefresh, { passive: false });
+    return () => scrollEl.removeEventListener('touchmove', movePullRefresh);
+  });
+
+  function canPullRefresh() {
+    return (
+      data.user &&
+      data.ready &&
+      !ui.quickAdd &&
+      !ui.openTaskId &&
+      !ui.showSettings &&
+      (scrollEl?.scrollTop ?? 0) <= 0
+    );
+  }
+
+  function resetPullRefresh() {
+    pullStartY = null;
+    pullStartX = 0;
+    pullDistance = 0;
+    pullReady = false;
+  }
+
+  function startPullRefresh(e) {
+    if (e.touches.length !== 1 || !canPullRefresh()) return;
+    pullStartY = e.touches[0].clientY;
+    pullStartX = e.touches[0].clientX;
+  }
+
+  function movePullRefresh(e) {
+    if (pullStartY === null || e.touches.length !== 1) return;
+
+    const touch = e.touches[0];
+    const dy = touch.clientY - pullStartY;
+    const dx = Math.abs(touch.clientX - pullStartX);
+    if (dy <= 0 || dx > dy) {
+      resetPullRefresh();
+      return;
+    }
+
+    const state = getPullRefreshState({
+      startY: pullStartY,
+      currentY: touch.clientY,
+      scrollTop: scrollEl?.scrollTop ?? 0,
+      threshold: PULL_REFRESH_THRESHOLD
+    });
+    pullDistance = state.distance;
+    pullReady = state.ready;
+
+    if (pullDistance > 0) e.preventDefault();
+  }
+
+  function finishPullRefresh() {
+    if (pullReady) {
+      pullReloading = true;
+      pullDistance = PULL_REFRESH_THRESHOLD;
+      location.reload();
+      return;
+    }
+    resetPullRefresh();
+  }
 </script>
 
 {#if data.user === undefined}
@@ -41,9 +115,22 @@
         </button>
       </div>
       <div
+        bind:this={scrollEl}
+        role="region"
+        aria-label="Task content"
+        ontouchstart={startPullRefresh}
+        ontouchend={finishPullRefresh}
+        ontouchcancel={resetPullRefresh}
         class="min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-28 sm:px-8 md:pt-8 md:pb-12"
         style="padding-bottom: max(7rem, env(safe-area-inset-bottom))"
       >
+        <div
+          class="pointer-events-none fixed left-1/2 z-50 flex items-center gap-2 rounded-full border border-zinc-200 bg-white/95 px-3 py-2 text-xs font-medium text-zinc-600 shadow-sm backdrop-blur transition dark:border-zinc-800 dark:bg-zinc-900/95 dark:text-zinc-300"
+          style={`top: max(0.75rem, env(safe-area-inset-top)); transform: translate(-50%, ${Math.min(pullDistance, PULL_REFRESH_THRESHOLD)}px); opacity: ${pullDistance || pullReloading ? 1 : 0};`}
+        >
+          <RefreshCw size={14} class={pullReloading ? 'animate-spin' : ''} />
+          {pullReloading ? 'Reloading…' : pullReady ? 'Release to reload' : 'Pull to reload'}
+        </div>
         <div class="mx-auto w-full max-w-3xl">
           {#if !data.ready}
             <p class="mt-12 text-center text-sm text-zinc-400">Loading…</p>
