@@ -1,0 +1,6 @@
+# Dev image: auto-recompiles on save via cargo-watch (source is bind-mounted).
+FROM rust:1.88-slim
+RUN cargo install cargo-watch --locked
+WORKDIR /app
+EXPOSE 8080
+CMD ["cargo", "watch", "-x", "run"]

@@ -1,0 +1,23 @@
+{
+  "name": "toodue-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/gen-icons.mjs && vite",
+    "build": "node scripts/gen-icons.mjs && vite build",
+    "preview": "vite preview",
+    "icons": "node scripts/gen-icons.mjs"
+  },
+  "dependencies": {
+    "@lucide/svelte": "latest"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "svelte": "^5.0.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^0.21.0"
+  }
+}

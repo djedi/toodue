@@ -1,0 +1,35 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./backend:/app
+      - cargo-registry:/usr/local/cargo/registry
+      - backend-target:/app/target
+      - ./data:/data
+    environment:
+      DATA_DIR: /data
+      PORT: "8080"
+      RUST_LOG: toodue=debug,tower_http=info
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    environment:
+      VITE_API_PROXY: http://backend:8080
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      - backend
+
+volumes:
+  cargo-registry:
+  backend-target:
+  frontend-node-modules:

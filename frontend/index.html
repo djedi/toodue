@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>TooDue</title>
+    <meta name="description" content="A fast, open-source to-do app you can self-host." />
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#0c0a09" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" />
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      try {
+        const t = localStorage.getItem('toodue-theme') || 'system';
+        if (t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
