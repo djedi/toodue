@@ -138,6 +138,11 @@
           {pullReloading ? 'Reloading…' : pullReady ? 'Release to reload' : 'Pull to reload'}
         </div>
         <div class="mx-auto w-full max-w-3xl">
+          {#if data.offline || data.syncPending}
+            <div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              {data.syncPending ? 'Syncing offline changes…' : 'Offline mode — changes are saved here and will sync when you reconnect.'}
+            </div>
+          {/if}
           {#if !data.ready}
             <p class="mt-12 text-center text-sm text-zinc-400">Loading…</p>
           {:else if ui.view === 'today'}

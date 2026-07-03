@@ -43,6 +43,18 @@
       name = detail.task.name;
       description = detail.task.description;
     } catch (err) {
+      const cached = data.tasks.find((t) => t.id === id);
+      if (cached && data.offline) {
+        detail = {
+          task: cached,
+          subtasks: data.tasks.filter((t) => t.parent_id === id),
+          comments: [],
+          attachments: []
+        };
+        name = cached.name;
+        description = cached.description;
+        return;
+      }
       toast(err.message);
       close();
     }

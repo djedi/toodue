@@ -1,10 +1,21 @@
 let onUnauthorized = () => {};
 
+export class OfflineError extends Error {
+  constructor(message = 'You are offline') {
+    super(message);
+    this.name = 'OfflineError';
+  }
+}
+
+export function isOfflineError(err) {
+  return err instanceof OfflineError || err?.name === 'OfflineError';
+}
+
 export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn;
 }
 
-async function request(method, path, body) {
+export async function request(method, path, body) {
   const opts = { method, headers: {} };
   if (body !== undefined) {
     if (body instanceof FormData) {
@@ -14,7 +25,15 @@ async function request(method, path, body) {
       opts.body = JSON.stringify(body);
     }
   }
-  const res = await fetch('/api' + path, opts);
+  let res;
+  try {
+    res = await fetch('/api' + path, opts);
+  } catch (err) {
+    if (typeof navigator === 'undefined' || navigator.onLine === false || err instanceof TypeError) {
+      throw new OfflineError();
+    }
+    throw err;
+  }
   if (res.status === 401) {
     onUnauthorized();
     throw new Error('Not signed in');
