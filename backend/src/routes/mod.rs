@@ -1,3 +1,5 @@
+pub mod ai;
+pub mod api_keys;
 pub mod attachments;
 pub mod comments;
 pub mod import;

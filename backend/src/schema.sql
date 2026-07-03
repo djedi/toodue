@@ -32,6 +32,16 @@ CREATE TABLE IF NOT EXISTS project_members (
   PRIMARY KEY (project_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS api_keys (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  prefix       TEXT NOT NULL,
+  token_hash   TEXT NOT NULL UNIQUE,
+  last_used_at TEXT,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -96,6 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_gcal_events_task ON gcal_events(task_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
 CREATE INDEX IF NOT EXISTS idx_members_user ON project_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id);

@@ -65,6 +65,28 @@ async fn main() {
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
         .route(
+            "/api-keys",
+            get(routes::api_keys::list).post(routes::api_keys::create),
+        )
+        .route("/api-keys/{id}", delete(routes::api_keys::remove))
+        .route("/ai/me", get(routes::ai::me))
+        .route(
+            "/ai/projects",
+            get(routes::ai::list_projects).post(routes::ai::create_project),
+        )
+        .route("/ai/projects/{id}", get(routes::ai::project_detail))
+        .route(
+            "/ai/tasks",
+            get(routes::ai::list_tasks).post(routes::ai::create_task),
+        )
+        .route("/ai/tasks/search", get(routes::ai::search_tasks))
+        .route(
+            "/ai/tasks/{id}",
+            get(routes::ai::task_detail)
+                .patch(routes::ai::update_task)
+                .delete(routes::ai::delete_task),
+        )
+        .route(
             "/projects",
             get(routes::projects::list).post(routes::projects::create),
         )

@@ -1,5 +1,6 @@
 <script>
   import { api } from '../api.js';
+  import { apiKeyCreatedMessage, maskApiKey } from '../apiKeys.js';
   import { data, ui, refresh, signOut, toast } from '../state.svelte.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import {
@@ -9,16 +10,59 @@
     Copy,
     FileUp,
     ChevronRight,
-    LogOut
+    KeyRound,
+    LogOut,
+    Trash2
   } from '@lucide/svelte';
 
   let importInput = $state(null);
   let importing = $state(false);
   let google = $state(null); // { configured, connected }
+  let apiKeys = $state([]);
+  let apiKeyName = $state('');
+  let newApiKey = $state(null);
+  let apiKeyBusy = $state(false);
 
   $effect(() => {
     api.get('/google/status').then((g) => (google = g)).catch(() => {});
+    api.get('/api-keys').then((keys) => (apiKeys = keys)).catch(() => {});
   });
+
+  async function createApiKey(e) {
+    e.preventDefault();
+    const name = apiKeyName.trim();
+    if (!name || apiKeyBusy) return;
+    apiKeyBusy = true;
+    try {
+      const created = await api.post('/api-keys', { name });
+      apiKeys = [created.api_key, ...apiKeys];
+      newApiKey = created.key;
+      apiKeyName = '';
+      await navigator.clipboard.writeText(created.key).catch(() => {});
+      toast(apiKeyCreatedMessage(name));
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      apiKeyBusy = false;
+    }
+  }
+
+  async function revokeApiKey(id) {
+    if (!confirm('Revoke this API key? Apps using it will stop working immediately.')) return;
+    try {
+      await api.del(`/api-keys/${id}`);
+      apiKeys = apiKeys.filter((k) => k.id !== id);
+      toast('API key revoked');
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  async function copyNewApiKey() {
+    if (!newApiKey) return;
+    await navigator.clipboard.writeText(newApiKey);
+    toast('API key copied');
+  }
 
   async function disconnectGoogle() {
     if (!confirm('Disconnect Google Calendar? The TooDue calendar will be removed from your Google account.'))
@@ -176,6 +220,58 @@
         class="hidden"
         onchange={importTodoist}
       />
+
+      <div class="rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div class="flex items-start gap-3">
+          <KeyRound size={18} class="mt-0.5 flex-none text-zinc-400" />
+          <div class="min-w-0 flex-1">
+            <span class="block text-sm font-medium">API keys</span>
+            <span class="block text-xs text-zinc-400">Use with AI agents, scripts, and the TooDue MCP server</span>
+          </div>
+        </div>
+
+        {#if newApiKey}
+          <div class="mt-3 rounded-lg border border-brand-200 bg-brand-50 p-2 text-xs text-brand-950 dark:border-brand-950 dark:bg-brand-950/60 dark:text-brand-100">
+            <div class="font-semibold">Copy this key now. It will only be shown once.</div>
+            <button type="button" onclick={copyNewApiKey} class="mt-1 w-full truncate rounded bg-white/70 px-2 py-1 text-left font-mono dark:bg-zinc-900/60">
+              {newApiKey}
+            </button>
+          </div>
+        {/if}
+
+        <form onsubmit={createApiKey} class="mt-3 flex gap-2">
+          <input
+            bind:value={apiKeyName}
+            placeholder="Key name, e.g. Claude Desktop"
+            class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-zinc-700"
+          />
+          <button
+            type="submit"
+            disabled={!apiKeyName.trim() || apiKeyBusy}
+            class="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            Create
+          </button>
+        </form>
+
+        {#if apiKeys.length}
+          <ul class="mt-3 space-y-1">
+            {#each apiKeys as key (key.id)}
+              <li class="flex items-center gap-2 rounded-lg py-1.5">
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-sm font-medium">{key.name}</div>
+                  <div class="truncate font-mono text-xs text-zinc-400">
+                    {maskApiKey(key.prefix)} · created {key.created_at.slice(0, 10)}{key.last_used_at ? ` · used ${key.last_used_at.slice(0, 10)}` : ''}
+                  </div>
+                </div>
+                <button type="button" aria-label="Revoke API key" onclick={() => revokeApiKey(key.id)} class="p-1 text-zinc-400 hover:text-red-600">
+                  <Trash2 size={15} />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
 
       <button
         onclick={signOut}

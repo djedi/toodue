@@ -9,6 +9,7 @@ use axum::Json;
 use chrono::{Duration, Utc};
 use rand::RngCore;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::error::{ApiError, ApiResult};
 use crate::models::User;
@@ -21,6 +22,21 @@ pub fn random_token() -> String {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     hex::encode(bytes)
+}
+
+pub fn hash_token(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 pub fn now_iso() -> String {
@@ -43,6 +59,9 @@ fn cookie_token(headers: &HeaderMap) -> Option<String> {
 #[derive(Clone)]
 pub struct AuthUser(pub User);
 
+#[derive(Clone)]
+pub struct ApiUser(pub User);
+
 impl<S> FromRequestParts<S> for AuthUser
 where
     AppState: FromRef<S>,
@@ -64,6 +83,34 @@ where
         .await?
         .ok_or_else(ApiError::unauthorized)?;
         Ok(AuthUser(user))
+    }
+}
+
+impl<S> FromRequestParts<S> for ApiUser
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let st = AppState::from_ref(state);
+        let token = bearer_token(&parts.headers).ok_or_else(ApiError::unauthorized)?;
+        let token_hash = hash_token(&token);
+        let user = sqlx::query_as::<_, User>(
+            "SELECT u.id, u.email, u.name FROM api_keys k \
+             JOIN users u ON u.id = k.user_id WHERE k.token_hash = ?",
+        )
+        .bind(&token_hash)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+        sqlx::query("UPDATE api_keys SET last_used_at = ? WHERE token_hash = ?")
+            .bind(now_iso())
+            .bind(&token_hash)
+            .execute(&st.db)
+            .await?;
+        Ok(ApiUser(user))
     }
 }
 
