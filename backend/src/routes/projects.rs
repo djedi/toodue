@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use axum::extract::{Path, State};
 use axum::Json;
 use serde::Deserialize;
@@ -144,6 +146,11 @@ pub async fn update(
                 return Err(ApiError::bad_request("a project cannot be its own parent"));
             }
             require_member(&st.db, user.id, *pid).await?;
+            if is_descendant(&st.db, id, *pid).await? {
+                return Err(ApiError::bad_request(
+                    "that would create a loop of nested projects",
+                ));
+            }
         }
         qb.push(", parent_id = ").push_bind(*parent_id);
     }
@@ -154,6 +161,120 @@ pub async fn update(
     let recipients = project_recipients(&st.db, id).await;
     st.hub.publish(recipients, "project.upsert", v.clone());
     Ok(Json(v))
+}
+
+/// True if `node` sits anywhere inside `ancestor`'s subtree (walking parents up).
+async fn is_descendant(db: &SqlitePool, ancestor: i64, node: i64) -> ApiResult<bool> {
+    let mut cur = node;
+    for _ in 0..100 {
+        let row: Option<(Option<i64>,)> =
+            sqlx::query_as("SELECT parent_id FROM projects WHERE id = ?")
+                .bind(cur)
+                .fetch_optional(db)
+                .await?;
+        match row.and_then(|r| r.0) {
+            Some(p) if p == ancestor => return Ok(true),
+            Some(p) => cur = p,
+            None => return Ok(false),
+        }
+    }
+    Ok(true) // absurdly deep chain — treat as a cycle
+}
+
+#[derive(Deserialize)]
+pub struct ReorderItem {
+    pub id: i64,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+    pub sort_order: i64,
+}
+
+#[derive(Deserialize)]
+pub struct ReorderBody {
+    pub items: Vec<ReorderItem>,
+}
+
+/// Applies a full drag-and-drop rearrangement: new parent and sort order for
+/// every project the client sends, atomically.
+pub async fn reorder(
+    State(st): State<AppState>,
+    AuthUser(user): AuthUser,
+    Json(b): Json<ReorderBody>,
+) -> ApiResult<Json<Value>> {
+    if b.items.is_empty() {
+        return Ok(Json(json!({ "ok": true })));
+    }
+    if b.items.len() > 500 {
+        return Err(ApiError::bad_request("too many projects in one reorder"));
+    }
+    let ids: HashSet<i64> = b.items.iter().map(|i| i.id).collect();
+    if ids.len() != b.items.len() {
+        return Err(ApiError::bad_request("duplicate project ids"));
+    }
+    for item in &b.items {
+        require_member(&st.db, user.id, item.id).await?;
+        let (is_inbox,): (i64,) = sqlx::query_as("SELECT is_inbox FROM projects WHERE id = ?")
+            .bind(item.id)
+            .fetch_one(&st.db)
+            .await?;
+        if is_inbox != 0 {
+            return Err(ApiError::bad_request("the inbox cannot be moved"));
+        }
+        if let Some(p) = item.parent_id {
+            if p == item.id {
+                return Err(ApiError::bad_request("a project cannot be its own parent"));
+            }
+            require_member(&st.db, user.id, p).await?;
+        }
+    }
+
+    // Cycle check against the proposed parents, falling back to current DB
+    // parents for projects outside the payload.
+    let proposed: HashMap<i64, Option<i64>> =
+        b.items.iter().map(|i| (i.id, i.parent_id)).collect();
+    for item in &b.items {
+        let mut seen = HashSet::from([item.id]);
+        let mut cur = item.parent_id;
+        while let Some(p) = cur {
+            if !seen.insert(p) {
+                return Err(ApiError::bad_request(
+                    "that would create a loop of nested projects",
+                ));
+            }
+            cur = match proposed.get(&p) {
+                Some(v) => *v,
+                None => {
+                    sqlx::query_as::<_, (Option<i64>,)>(
+                        "SELECT parent_id FROM projects WHERE id = ?",
+                    )
+                    .bind(p)
+                    .fetch_optional(&st.db)
+                    .await?
+                    .and_then(|r| r.0)
+                }
+            };
+        }
+    }
+
+    let mut tx = st.db.begin().await?;
+    for item in &b.items {
+        sqlx::query("UPDATE projects SET parent_id = ?, sort_order = ? WHERE id = ?")
+            .bind(item.parent_id)
+            .bind(item.sort_order)
+            .bind(item.id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+
+    let mut recipients = Vec::new();
+    for id in &ids {
+        recipients.extend(project_recipients(&st.db, *id).await);
+    }
+    recipients.sort_unstable();
+    recipients.dedup();
+    st.hub.publish(recipients, "projects.refresh", json!({}));
+    Ok(Json(json!({ "ok": true })))
 }
 
 pub async fn remove(

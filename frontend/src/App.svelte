@@ -27,9 +27,9 @@
   <div class="flex h-dvh bg-white dark:bg-zinc-950">
     <Sidebar />
     <main class="flex min-w-0 flex-1 flex-col">
-      <!-- Mobile top bar: settings gear in the upper left -->
+      <!-- Mobile top bar: settings gear in the upper right -->
       <div
-        class="flex flex-none items-center px-2 pb-0.5 md:hidden"
+        class="flex flex-none items-center justify-end px-2 pb-0.5 md:hidden"
         style="padding-top: max(0.25rem, env(safe-area-inset-top))"
       >
         <button

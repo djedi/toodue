@@ -1,15 +1,32 @@
 <script>
-  import { data, navigate, addProject, toast } from '../state.svelte.js';
-  import { Hash, Plus, Users, ChevronRight } from '@lucide/svelte';
+  import { data, navigate, addProject, reorderProjects, toast } from '../state.svelte.js';
+  import { Hash, Plus, Users, ChevronRight, GripVertical } from '@lucide/svelte';
 
-  const rootProjects = $derived(data.projects.filter((p) => !p.is_inbox && !p.parent_id));
+  const INDENT = 24; // px per nesting level; dragging this far sideways changes depth
 
-  function children(id) {
-    return data.projects.filter((p) => p.parent_id === id);
-  }
+  // Depth-first flattening of the project tree. Projects whose parent isn't
+  // visible (e.g. a shared child of an unshared parent) render as roots.
+  const rows = $derived.by(() => {
+    const list = data.projects.filter((p) => !p.is_inbox);
+    const ids = new Set(list.map((p) => p.id));
+    const out = [];
+    const add = (parentId, depth) => {
+      for (const p of list) {
+        const pid = p.parent_id && ids.has(p.parent_id) ? p.parent_id : null;
+        if (pid === parentId) {
+          out.push({ p, depth });
+          add(p.id, depth + 1);
+        }
+      }
+    };
+    add(null, 0);
+    return out;
+  });
 
   let adding = $state(false);
   let newName = $state('');
+  let listEl = $state(null);
+  let drag = $state(null); // { id, subtree:Set, origDepth, startX, indicator }
 
   async function createProject(e) {
     e.preventDefault();
@@ -23,28 +40,98 @@
       toast(err.message);
     }
   }
-</script>
 
-{#snippet projectRow(project, depth)}
-  <button
-    onclick={() => navigate('project', project.id)}
-    class="flex w-full items-center gap-3 border-b border-zinc-100 py-3 text-left dark:border-zinc-800/70"
-    style="padding-left: {depth * 24}px"
-  >
-    <Hash size={17} class="flex-none text-zinc-400" />
-    <span class="min-w-0 flex-1 truncate text-sm font-medium">{project.name}</span>
-    {#if project.members?.length > 1}
-      <Users size={14} class="flex-none text-zinc-400" />
-    {/if}
-    {#if project.active_count}
-      <span class="text-xs text-zinc-400">{project.active_count}</span>
-    {/if}
-    <ChevronRight size={16} class="text-zinc-300 dark:text-zinc-600" />
-  </button>
-  {#each children(project.id) as child (child.id)}
-    {@render projectRow(child, depth + 1)}
-  {/each}
-{/snippet}
+  function subtreeIds(id) {
+    const s = new Set([id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const r of rows) {
+        if (!s.has(r.p.id) && r.p.parent_id && s.has(r.p.parent_id)) {
+          s.add(r.p.id);
+          grew = true;
+        }
+      }
+    }
+    return s;
+  }
+
+  function startDrag(e, row) {
+    e.preventDefault();
+    drag = {
+      id: row.p.id,
+      subtree: subtreeIds(row.p.id),
+      origDepth: row.depth,
+      startX: e.clientX,
+      indicator: null
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', endDrag, { once: true });
+    onMove(e);
+  }
+
+  function candidateEls() {
+    return [...listEl.querySelectorAll('[data-pid]')].filter(
+      (el) => !drag.subtree.has(Number(el.dataset.pid))
+    );
+  }
+
+  function onMove(e) {
+    if (!drag) return;
+    const els = candidateEls();
+    const listTop = listEl.getBoundingClientRect().top;
+    let index = 0;
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (e.clientY > r.top + r.height / 2) index++;
+      else break;
+    }
+    const vis = rows.filter((r) => !drag.subtree.has(r.p.id));
+    const above = vis[index - 1];
+    const below = vis[index];
+    const maxDepth = above ? above.depth + 1 : 0;
+    const minDepth = below ? Math.min(below.depth, maxDepth) : 0;
+    let depth = drag.origDepth + Math.round((e.clientX - drag.startX) / INDENT);
+    depth = Math.max(minDepth, Math.min(maxDepth, depth));
+    const y =
+      index === 0
+        ? els.length
+          ? els[0].getBoundingClientRect().top - listTop
+          : 0
+        : els[index - 1].getBoundingClientRect().bottom - listTop;
+    drag.indicator = { index, depth, y };
+  }
+
+  async function endDrag() {
+    window.removeEventListener('pointermove', onMove);
+    const d = drag;
+    drag = null;
+    if (!d?.indicator) return;
+
+    const vis = rows.filter((r) => !d.subtree.has(r.p.id));
+    const moved = rows.filter((r) => d.subtree.has(r.p.id));
+    const delta = d.indicator.depth - d.origDepth;
+    const newRows = [
+      ...vis.slice(0, d.indicator.index),
+      ...moved.map((r) => ({ p: r.p, depth: r.depth + delta })),
+      ...vis.slice(d.indicator.index)
+    ];
+    const unchanged =
+      newRows.length === rows.length &&
+      newRows.every((r, i) => r.p.id === rows[i].p.id && r.depth === rows[i].depth);
+    if (unchanged) return;
+
+    // Depths → parents: the parent of a row is the last row seen one level up.
+    const stack = [];
+    const items = newRows.map((r, i) => {
+      const parent_id = r.depth > 0 ? stack[r.depth - 1] : null;
+      stack[r.depth] = r.p.id;
+      stack.length = r.depth + 1;
+      return { id: r.p.id, parent_id, sort_order: i + 1 };
+    });
+    await reorderProjects(items);
+  }
+</script>
 
 <header class="mb-4 flex items-center justify-between">
   <h1 class="text-2xl font-bold tracking-tight">Projects</h1>
@@ -67,12 +154,54 @@
   </form>
 {/if}
 
-<div class="mt-1">
-  {#each rootProjects as project (project.id)}
-    {@render projectRow(project, 0)}
+<div bind:this={listEl} class="relative mt-1">
+  {#each rows as row (row.p.id)}
+    <div
+      data-pid={row.p.id}
+      class="flex w-full items-center gap-1 border-b border-zinc-100 dark:border-zinc-800/70 {drag?.subtree.has(
+        row.p.id
+      )
+        ? 'opacity-40'
+        : ''}"
+      style="padding-left: {row.depth * INDENT}px"
+    >
+      <button
+        aria-label="Drag to reorder or nest"
+        onpointerdown={(e) => startDrag(e, row)}
+        class="-ml-1.5 cursor-grab touch-none p-1.5 text-zinc-300 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:text-zinc-400"
+      >
+        <GripVertical size={15} />
+      </button>
+      <button
+        onclick={() => navigate('project', row.p.id)}
+        class="flex min-w-0 flex-1 items-center gap-3 py-3 text-left"
+      >
+        <Hash size={17} class="flex-none text-zinc-400" />
+        <span class="min-w-0 flex-1 truncate text-sm font-medium">{row.p.name}</span>
+        {#if row.p.members?.length > 1}
+          <Users size={14} class="flex-none text-zinc-400" />
+        {/if}
+        {#if row.p.active_count}
+          <span class="text-xs text-zinc-400">{row.p.active_count}</span>
+        {/if}
+        <ChevronRight size={16} class="text-zinc-300 dark:text-zinc-600" />
+      </button>
+    </div>
   {:else}
     {#if !adding}
       <p class="py-3 text-sm text-zinc-400">No projects yet — create one to organize your tasks.</p>
     {/if}
   {/each}
+  {#if drag?.indicator}
+    <div
+      class="pointer-events-none absolute right-0 z-10 h-0.5 rounded bg-brand-500"
+      style="top: {drag.indicator.y - 1}px; left: {drag.indicator.depth * INDENT}px"
+    ></div>
+  {/if}
 </div>
+
+{#if rows.length > 1}
+  <p class="mt-3 text-xs text-zinc-400">
+    Drag the handle to reorder — drag right while dropping to nest inside the project above.
+  </p>
+{/if}

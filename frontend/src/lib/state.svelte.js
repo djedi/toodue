@@ -106,6 +106,10 @@ export async function refreshTasks() {
   data.tasks = await api.get('/tasks');
 }
 
+export async function refreshProjects() {
+  data.projects = await api.get('/projects');
+}
+
 /* ---------- realtime ---------- */
 
 let es;
@@ -150,6 +154,9 @@ function handleEvent({ type, data: d }) {
       break;
     case 'tasks.refresh':
       refreshTasks().catch(() => {});
+      break;
+    case 'projects.refresh':
+      refreshProjects().catch(() => {});
       break;
     case 'project.upsert': {
       const known = data.projects.some((p) => p.id === d.id);
@@ -226,6 +233,27 @@ export async function deleteProject(id) {
   data.projects = data.projects.filter((p) => p.id !== id);
   data.tasks = data.tasks.filter((t) => t.project_id !== id);
   if (ui.view === 'project' && ui.projectId === id) navigate('projects');
+}
+
+export async function reorderProjects(items) {
+  // Optimistic: apply the new tree locally, reconcile with the server after.
+  const byId = new Map(items.map((i) => [i.id, i]));
+  for (const p of data.projects) {
+    const it = byId.get(p.id);
+    if (it) {
+      p.parent_id = it.parent_id;
+      p.sort_order = it.sort_order;
+    }
+  }
+  data.projects.sort(
+    (a, b) => b.is_inbox - a.is_inbox || a.sort_order - b.sort_order || a.id - b.id
+  );
+  try {
+    await api.post('/projects/reorder', { items });
+  } catch (e) {
+    toast(e.message);
+    await refreshProjects();
+  }
 }
 
 export async function shareProject(id, email) {

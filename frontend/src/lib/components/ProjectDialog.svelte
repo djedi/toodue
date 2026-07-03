@@ -17,6 +17,30 @@
 
   const isOwner = $derived(project.owner_id === data.user.id);
 
+  // Valid parents: not the inbox, not itself, not anything inside its own subtree.
+  const possibleParents = $derived.by(() => {
+    const descendants = new Set([project.id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const p of data.projects) {
+        if (!descendants.has(p.id) && p.parent_id && descendants.has(p.parent_id)) {
+          descendants.add(p.id);
+          grew = true;
+        }
+      }
+    }
+    return data.projects.filter((p) => !p.is_inbox && !descendants.has(p.id));
+  });
+
+  async function setParent(value) {
+    try {
+      await updateProject(project.id, { parent_id: value ? Number(value) : null });
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
   async function rename() {
     if (!name.trim() || name === project.name) return;
     try {
@@ -88,6 +112,20 @@
         onkeydown={(e) => e.key === 'Enter' && e.target.blur()}
         class="mt-1 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-zinc-700"
       />
+    </label>
+
+    <label class="mt-4 block">
+      <span class="text-xs font-semibold tracking-wide text-zinc-400 uppercase">Parent project</span>
+      <select
+        value={project.parent_id ?? ''}
+        onchange={(e) => setParent(e.target.value)}
+        class="mt-1 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-zinc-700"
+      >
+        <option value="">None (top level)</option>
+        {#each possibleParents as p (p.id)}
+          <option value={p.id}>{p.name}</option>
+        {/each}
+      </select>
     </label>
 
     <div class="mt-5">

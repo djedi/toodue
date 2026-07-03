@@ -117,7 +117,13 @@
 
   <div class="mt-6 flex min-h-0 flex-1 flex-col px-3">
     <div class="flex items-center justify-between px-2.5 pb-1">
-      <span class="text-xs font-semibold tracking-wide text-zinc-500 uppercase">My Projects</span>
+      <button
+        onclick={() => navigate('projects')}
+        title="Sort and nest projects"
+        class="text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-brand-600"
+      >
+        My Projects
+      </button>
       <button
         aria-label="Add project"
         onclick={() => (adding = !adding)}
