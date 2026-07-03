@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::extract::{Path, State};
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
@@ -307,6 +307,18 @@ pub struct ShareBody {
     pub email: String,
 }
 
+#[derive(Deserialize)]
+pub struct BulkShareBody {
+    pub email: String,
+    pub project_ids: Vec<i64>,
+}
+
+#[derive(Serialize)]
+pub struct BulkShareSkip {
+    pub id: i64,
+    pub reason: String,
+}
+
 pub async fn share(
     State(st): State<AppState>,
     AuthUser(user): AuthUser,
@@ -344,6 +356,104 @@ pub async fn share(
     st.hub.publish(recipients, "project.upsert", v.clone());
     crate::gcal::spawn_project_sync(&st, id);
     Ok(Json(v))
+}
+
+pub async fn share_bulk(
+    State(st): State<AppState>,
+    AuthUser(user): AuthUser,
+    Json(b): Json<BulkShareBody>,
+) -> ApiResult<Json<Value>> {
+    let email = b.email.trim().to_lowercase();
+    if email.is_empty() {
+        return Err(ApiError::bad_request("email is required"));
+    }
+    if b.project_ids.is_empty() {
+        return Err(ApiError::bad_request(
+            "choose at least one project to share",
+        ));
+    }
+    if b.project_ids.len() > 500 {
+        return Err(ApiError::bad_request("too many projects in one share"));
+    }
+
+    let target: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE email = ?")
+        .bind(&email)
+        .fetch_optional(&st.db)
+        .await?;
+    let (target_id,) = target.ok_or_else(|| {
+        ApiError::bad_request("no TooDue account with that email — ask them to sign up first")
+    })?;
+
+    let mut shared = Vec::new();
+    let mut already_shared = Vec::new();
+    let mut skipped = Vec::new();
+
+    for id in HashSet::<i64>::from_iter(b.project_ids) {
+        let row: Option<(i64,)> = sqlx::query_as("SELECT is_inbox FROM projects WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&st.db)
+            .await?;
+        let Some((is_inbox,)) = row else {
+            skipped.push(BulkShareSkip {
+                id,
+                reason: "project not found".into(),
+            });
+            continue;
+        };
+        if is_inbox != 0 {
+            skipped.push(BulkShareSkip {
+                id,
+                reason: "the inbox cannot be shared".into(),
+            });
+            continue;
+        }
+        if require_member(&st.db, user.id, id).await.is_err() {
+            skipped.push(BulkShareSkip {
+                id,
+                reason: "you don't have access to that project".into(),
+            });
+            continue;
+        }
+
+        let exists: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?")
+                .bind(id)
+                .bind(target_id)
+                .fetch_optional(&st.db)
+                .await?;
+        if exists.is_some() {
+            already_shared.push(id);
+            continue;
+        }
+
+        sqlx::query(
+            "INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'member')",
+        )
+        .bind(id)
+        .bind(target_id)
+        .execute(&st.db)
+        .await?;
+        shared.push(id);
+    }
+
+    let mut projects = Vec::new();
+    for id in shared.iter().chain(already_shared.iter()) {
+        if let Ok(v) = project_json(&st.db, *id).await {
+            projects.push(v.clone());
+            let recipients = project_recipients(&st.db, *id).await;
+            st.hub.publish(recipients, "project.upsert", v);
+        }
+    }
+    for id in &shared {
+        crate::gcal::spawn_project_sync(&st, *id);
+    }
+
+    Ok(Json(json!({
+        "shared": shared,
+        "already_shared": already_shared,
+        "skipped": skipped,
+        "projects": projects,
+    })))
 }
 
 pub async fn remove_member(

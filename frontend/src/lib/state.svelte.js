@@ -262,6 +262,12 @@ export async function shareProject(id, email) {
   return p;
 }
 
+export async function shareProjects(projectIds, email) {
+  const result = await api.post('/projects/share-bulk', { email, project_ids: projectIds });
+  for (const p of result.projects ?? []) upsert(data.projects, p);
+  return result;
+}
+
 export async function removeMember(projectId, userId) {
   const p = await api.del(`/projects/${projectId}/members/${userId}`);
   if (userId === data.user.id) {

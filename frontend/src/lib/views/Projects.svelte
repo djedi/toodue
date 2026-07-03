@@ -1,6 +1,7 @@
 <script>
-  import { data, navigate, addProject, reorderProjects, toast } from '../state.svelte.js';
-  import { Hash, Plus, Users, ChevronRight, GripVertical } from '@lucide/svelte';
+  import { data, navigate, addProject, reorderProjects, shareProjects, toast } from '../state.svelte.js';
+  import { bulkShareMessage } from '../bulkShare.js';
+  import { Hash, Plus, Users, ChevronRight, GripVertical, UserPlus, X } from '@lucide/svelte';
 
   const INDENT = 24; // px per nesting level; dragging this far sideways changes depth
 
@@ -27,6 +28,55 @@
   let newName = $state('');
   let listEl = $state(null);
   let drag = $state(null); // { id, subtree:Set, origDepth, startX, indicator }
+  let bulkShareOpen = $state(false);
+  let bulkEmail = $state('');
+  let bulkBusy = $state(false);
+  let selectedProjectIds = $state(new Set());
+
+  const selectedCount = $derived(selectedProjectIds.size);
+
+  function selectableProjectIds() {
+    return rows.map((r) => r.p.id);
+  }
+
+  function openBulkShare() {
+    selectedProjectIds = new Set(selectableProjectIds());
+    bulkShareOpen = true;
+  }
+
+  function closeBulkShare() {
+    if (bulkBusy) return;
+    bulkShareOpen = false;
+  }
+
+  function toggleBulkProject(id) {
+    const next = new Set(selectedProjectIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedProjectIds = next;
+  }
+
+  function setAllBulkProjects(checked) {
+    selectedProjectIds = checked ? new Set(selectableProjectIds()) : new Set();
+  }
+
+  async function submitBulkShare(e) {
+    e.preventDefault();
+    if (!bulkEmail.trim() || selectedProjectIds.size === 0 || bulkBusy) return;
+    bulkBusy = true;
+    try {
+      const email = bulkEmail.trim();
+      const result = await shareProjects([...selectedProjectIds], email);
+      toast(bulkShareMessage({ email, ...result }));
+      bulkEmail = '';
+      selectedProjectIds = new Set();
+      bulkShareOpen = false;
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      bulkBusy = false;
+    }
+  }
 
   async function createProject(e) {
     e.preventDefault();
@@ -135,13 +185,24 @@
 
 <header class="mb-4 flex items-center justify-between">
   <h1 class="text-2xl font-bold tracking-tight">Projects</h1>
-  <button
-    aria-label="Add project"
-    onclick={() => (adding = !adding)}
-    class="rounded p-1 text-zinc-400 hover:text-brand-600"
-  >
-    <Plus size={20} />
-  </button>
+  <div class="flex items-center gap-1">
+    {#if rows.length}
+      <button
+        aria-label="Share multiple projects"
+        onclick={openBulkShare}
+        class="rounded p-1.5 text-zinc-400 hover:text-brand-600"
+      >
+        <UserPlus size={19} />
+      </button>
+    {/if}
+    <button
+      aria-label="Add project"
+      onclick={() => (adding = !adding)}
+      class="rounded p-1.5 text-zinc-400 hover:text-brand-600"
+    >
+      <Plus size={20} />
+    </button>
+  </div>
 </header>
 
 {#if adding}
@@ -152,6 +213,83 @@
       class="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-zinc-700"
     />
   </form>
+{/if}
+
+{#if bulkShareOpen}
+  <div
+    class="fixed inset-0 z-40 flex items-end justify-center bg-black/40 sm:items-center sm:p-6"
+    role="presentation"
+    onclick={(e) => e.target === e.currentTarget && closeBulkShare()}
+  >
+    <form
+      onsubmit={submitBulkShare}
+      class="w-full rounded-t-2xl bg-white p-5 shadow-xl sm:max-w-md sm:rounded-2xl dark:bg-zinc-900"
+    >
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold">Share projects</h2>
+          <p class="text-xs text-zinc-400">Choose projects and invite someone by email.</p>
+        </div>
+        <button type="button" aria-label="Close" onclick={closeBulkShare} class="p-1 text-zinc-400 hover:text-zinc-600">
+          <X size={18} />
+        </button>
+      </div>
+
+      <label class="mt-4 block">
+        <span class="text-xs font-semibold tracking-wide text-zinc-400 uppercase">Email</span>
+        <input
+          bind:value={bulkEmail}
+          type="email"
+          placeholder="friend@example.com"
+          class="mt-1 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-zinc-700"
+        />
+      </label>
+
+      <div class="mt-4 flex items-center justify-between">
+        <span class="text-xs font-semibold tracking-wide text-zinc-400 uppercase">Projects</span>
+        <label class="flex items-center gap-2 text-xs text-zinc-500">
+          <input
+            type="checkbox"
+            checked={selectedCount === rows.length}
+            onchange={(e) => setAllBulkProjects(e.target.checked)}
+          />
+          Select all
+        </label>
+      </div>
+
+      <div class="mt-2 max-h-72 space-y-1 overflow-y-auto rounded-xl border border-zinc-200 p-2 dark:border-zinc-800">
+        {#each rows as row (row.p.id)}
+          <label
+            class="flex items-center gap-3 rounded-lg px-2 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            style="padding-left: {0.5 + row.depth * 1.25}rem"
+          >
+            <input
+              type="checkbox"
+              checked={selectedProjectIds.has(row.p.id)}
+              onchange={() => toggleBulkProject(row.p.id)}
+            />
+            <Hash size={15} class="flex-none text-zinc-400" />
+            <span class="min-w-0 flex-1 truncate">{row.p.name}</span>
+            {#if row.p.members?.length > 1}
+              <Users size={13} class="flex-none text-zinc-400" />
+            {/if}
+          </label>
+        {/each}
+      </div>
+
+      <p class="mt-2 text-xs text-zinc-400">
+        {selectedCount} {selectedCount === 1 ? 'project' : 'projects'} selected. Shared projects and tasks sync live.
+      </p>
+
+      <button
+        type="submit"
+        disabled={!bulkEmail.trim() || selectedCount === 0 || bulkBusy}
+        class="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+      >
+        <UserPlus size={16} /> {bulkBusy ? 'Sharing…' : `Share ${selectedCount || ''} projects`}
+      </button>
+    </form>
+  </div>
 {/if}
 
 <div bind:this={listEl} class="relative mt-1">

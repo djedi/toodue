@@ -73,6 +73,7 @@ async fn main() {
             axum::routing::patch(routes::projects::update).delete(routes::projects::remove),
         )
         .route("/projects/reorder", post(routes::projects::reorder))
+        .route("/projects/share-bulk", post(routes::projects::share_bulk))
         .route("/projects/{id}/share", post(routes::projects::share))
         .route(
             "/projects/{id}/members/{user_id}",
