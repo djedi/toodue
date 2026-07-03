@@ -14,6 +14,8 @@
   import ProjectView from './lib/views/Project.svelte';
   import { Plus, RefreshCw, Settings as SettingsIcon } from '@lucide/svelte';
   import { getPullRefreshState } from './lib/pullRefresh.js';
+  import { getQuickAddDefaults } from './lib/quickAdd.js';
+  import { todayStr } from './lib/dates.js';
 
   boot();
 
@@ -89,6 +91,10 @@
     }
     resetPullRefresh();
   }
+
+  function openQuickAdd() {
+    ui.quickAdd = getQuickAddDefaults({ view: ui.view, projectId: ui.projectId, today: todayStr() });
+  }
 </script>
 
 {#if data.user === undefined}
@@ -153,7 +159,7 @@
   <!-- Floating add button (mobile) -->
   <button
     aria-label="Add task"
-    onclick={() => (ui.quickAdd = {})}
+    onclick={openQuickAdd}
     class="fixed right-5 bottom-24 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg shadow-brand-600/30 transition active:scale-95 md:hidden"
   >
     <Plus size={28} />

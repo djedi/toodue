@@ -1,6 +1,7 @@
 <script>
   import { data, ui, navigate, inboxProject, addProject, toast } from '../state.svelte.js';
   import { todayStr } from '../dates.js';
+  import { getQuickAddDefaults } from '../quickAdd.js';
   import {
     CircleCheckBig,
     Inbox,
@@ -44,6 +45,10 @@
     }
   }
 
+  function openQuickAdd() {
+    ui.quickAdd = getQuickAddDefaults({ view: ui.view, projectId: ui.projectId, today: todayStr() });
+  }
+
   const navBtn =
     'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition hover:bg-zinc-200/60 dark:hover:bg-zinc-800';
 </script>
@@ -79,7 +84,7 @@
 
   <div class="px-3">
     <button
-      onclick={() => (ui.quickAdd = {})}
+      onclick={openQuickAdd}
       class="mb-3 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-brand-600 transition hover:bg-brand-50 dark:hover:bg-brand-950/40"
     >
       <span class="flex h-6 w-6 items-center justify-center rounded-full bg-brand-600 text-white">
