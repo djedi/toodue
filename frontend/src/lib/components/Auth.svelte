@@ -90,5 +90,15 @@
         {mode === 'login' ? 'Sign up' : 'Log in'}
       </button>
     </p>
+
+    <p class="mt-3 text-center text-sm text-zinc-500">
+      Building an integration?
+      <a
+        class="font-semibold text-brand-600 hover:underline"
+        href="https://docs.toodue.com"
+        target="_blank"
+        rel="noreferrer"
+      >API docs</a>
+    </p>
   </div>
 </div>
