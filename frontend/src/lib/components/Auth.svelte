@@ -2,6 +2,7 @@
   import { api } from '../api.js';
   import { data, afterSignIn } from '../state.svelte.js';
   import BrandLogo from './BrandLogo.svelte';
+  import ThemeSwitcher from './ThemeSwitcher.svelte';
 
   let mode = $state('login');
   let name = $state('');
@@ -31,6 +32,11 @@
   <div class="w-full max-w-sm">
     <div class="mb-8 flex justify-center">
       <BrandLogo size="lg" class="text-3xl" />
+    </div>
+
+    <div class="mb-4 flex items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
+      <span class="font-medium">Theme</span>
+      <ThemeSwitcher />
     </div>
 
     <div class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
