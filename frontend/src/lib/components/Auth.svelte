@@ -2,8 +2,6 @@
   import { api } from '../api.js';
   import { data, afterSignIn } from '../state.svelte.js';
   import BrandLogo from './BrandLogo.svelte';
-  import ThemeSwitcher from './ThemeSwitcher.svelte';
-  import ColorSchemePicker from './ColorSchemePicker.svelte';
 
   let mode = $state('login');
   let name = $state('');
@@ -33,15 +31,6 @@
   <div class="w-full max-w-sm">
     <div class="mb-8 flex justify-center">
       <BrandLogo size="lg" class="text-3xl" />
-    </div>
-
-    <div class="mb-4 flex items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
-      <span class="font-medium">Theme</span>
-      <ThemeSwitcher />
-    </div>
-
-    <div class="mb-4 flex justify-center">
-      <ColorSchemePicker />
     </div>
 
     <div class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -99,16 +88,6 @@
       >
         {mode === 'login' ? 'Sign up' : 'Log in'}
       </button>
-    </p>
-
-    <p class="mt-3 text-center text-sm text-zinc-500">
-      Building an integration?
-      <a
-        class="font-semibold text-brand-600 hover:underline"
-        href="https://docs.toodue.com"
-        target="_blank"
-        rel="noreferrer"
-      >API docs</a>
     </p>
   </div>
 </div>
