@@ -31,7 +31,8 @@ export const ui = $state({
   quickAdd: null, // null or { project_id?, due_date?, parent_id? }
   showSettings: false,
   toast: null,
-  theme: 'system'
+  theme: 'system',
+  colorScheme: 'sky'
 });
 
 // Components (e.g. the task modal) listen here for raw server events.
@@ -53,11 +54,18 @@ function systemPrefersDark() {
 export function applyTheme() {
   const dark = ui.theme === 'dark' || (ui.theme === 'system' && systemPrefersDark());
   document.documentElement.classList.toggle('dark', dark);
+  document.documentElement.dataset.colorScheme = ui.colorScheme || 'sky';
 }
 
 export function setTheme(t) {
   ui.theme = t;
   localStorage.setItem('toodue-theme', t);
+  applyTheme();
+}
+
+export function setColorScheme(s) {
+  ui.colorScheme = s;
+  localStorage.setItem('toodue-color-scheme', s);
   applyTheme();
 }
 
@@ -152,7 +160,9 @@ export function syncRoute() {
 
 export async function boot() {
   ui.theme = localStorage.getItem('toodue-theme') || 'system';
+  ui.colorScheme = localStorage.getItem('toodue-color-scheme') || 'sky';
   applyTheme();
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
   window.addEventListener('hashchange', syncRoute);
   window.addEventListener('online', markOnline);

@@ -3,6 +3,7 @@
   import { apiKeyCreatedMessage, maskApiKey } from '../apiKeys.js';
   import { data, ui, refresh, signOut, toast } from '../state.svelte.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
+  import ColorSchemePicker from './ColorSchemePicker.svelte';
   import {
     X,
     CalendarPlus,
@@ -156,6 +157,14 @@
       <div class="{row} justify-between">
         <span class="text-sm font-medium">Theme</span>
         <ThemeSwitcher />
+      </div>
+
+      <div class="{row} flex-col items-stretch gap-2">
+        <div>
+          <span class="block text-sm font-medium">Color scheme</span>
+          <span class="block text-xs text-zinc-400">Pick the main accent color for buttons, links, and highlights</span>
+        </div>
+        <ColorSchemePicker />
       </div>
 
       {#if google?.configured}
