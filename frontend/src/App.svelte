@@ -12,6 +12,7 @@
   import InboxView from './lib/views/Inbox.svelte';
   import ProjectsView from './lib/views/Projects.svelte';
   import ProjectView from './lib/views/Project.svelte';
+  import BrandLogo from './lib/components/BrandLogo.svelte';
   import { Plus, RefreshCw, Settings as SettingsIcon } from '@lucide/svelte';
   import { getPullRefreshState } from './lib/pullRefresh.js';
   import { getQuickAddDefaults } from './lib/quickAdd.js';
@@ -99,7 +100,7 @@
 
 {#if data.user === undefined}
   <div class="flex h-dvh items-center justify-center">
-    <div class="text-2xl font-bold tracking-tight text-brand-600">TooDue</div>
+    <BrandLogo size="md" class="text-2xl text-brand-600" />
   </div>
 {:else if data.user === null}
   <Auth />

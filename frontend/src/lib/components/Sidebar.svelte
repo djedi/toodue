@@ -2,8 +2,8 @@
   import { data, ui, navigate, inboxProject, addProject, toast } from '../state.svelte.js';
   import { todayStr } from '../dates.js';
   import { getQuickAddDefaults } from '../quickAdd.js';
+  import BrandLogo from './BrandLogo.svelte';
   import {
-    CircleCheckBig,
     Inbox,
     CalendarCheck,
     CalendarDays,
@@ -78,8 +78,7 @@
   class="hidden w-72 flex-none flex-col border-r border-zinc-200 bg-zinc-50 md:flex dark:border-zinc-800 dark:bg-zinc-900/50"
 >
   <div class="flex items-center gap-2 px-5 pt-5 pb-4">
-    <CircleCheckBig class="text-brand-600" size={24} />
-    <span class="text-xl font-bold tracking-tight">TooDue</span>
+    <BrandLogo size="sm" class="text-xl" />
   </div>
 
   <div class="px-3">
