@@ -1,10 +1,23 @@
 <script>
-  import { data, ui } from '../state.svelte.js';
+  import { data, ui, updateTask, toast } from '../state.svelte.js';
   import { todayStr, fullDayLabel } from '../dates.js';
   import TaskList from '../components/TaskList.svelte';
-  import { Plus, PartyPopper } from '@lucide/svelte';
+  import DatePicker from '../components/DatePicker.svelte';
+  import { Plus, PartyPopper, ChevronDown } from '@lucide/svelte';
+
+  let rescheduling = $state(false);
 
   const today = $derived(todayStr());
+
+  // Move every overdue task to the picked day (or clear the date entirely).
+  async function rescheduleOverdue(due_date) {
+    const fields = due_date ? { due_date } : { due_date: null, due_time: null };
+    try {
+      await Promise.all(overdue.map((t) => updateTask(t.id, fields)));
+    } catch (err) {
+      toast(err.message);
+    }
+  }
   const overdue = $derived(
     data.tasks
       .filter((t) => t.due_date && t.due_date < today && !t.completed_at)
@@ -24,9 +37,18 @@
 
 {#if overdue.length}
   <section class="mb-6">
-    <h2 class="border-b border-zinc-200 pb-1.5 text-sm font-semibold text-red-600 dark:border-zinc-800 dark:text-red-400">
-      Overdue · {overdue.length}
-    </h2>
+    <div class="flex items-baseline justify-between border-b border-zinc-200 pb-1.5 dark:border-zinc-800">
+      <h2 class="text-sm font-semibold text-red-600 dark:text-red-400">
+        Overdue · {overdue.length}
+      </h2>
+      <button
+        onclick={() => (rescheduling = true)}
+        class="flex items-center gap-0.5 text-sm font-semibold text-brand-600 hover:text-brand-700"
+      >
+        Reschedule
+        <ChevronDown size={14} />
+      </button>
+    </div>
     <TaskList tasks={overdue} showProject />
   </section>
 {/if}
@@ -55,3 +77,12 @@
   <span class="flex h-5 w-5 items-center justify-center rounded-full text-brand-600"><Plus size={16} /></span>
   Add task
 </button>
+
+{#if rescheduling}
+  <DatePicker
+    title="Reschedule"
+    allowsTime={false}
+    onselect={rescheduleOverdue}
+    onclose={() => (rescheduling = false)}
+  />
+{/if}

@@ -12,6 +12,7 @@
     toast
   } from '../state.svelte.js';
   import { fmtTimestamp, fmtTime, dayLabel } from '../dates.js';
+  import DatePicker from './DatePicker.svelte';
   import {
     X,
     Check,
@@ -33,6 +34,7 @@
   let newSubtask = $state('');
   let newComment = $state('');
   let fileInput = $state(null);
+  let pickerFor = $state(null); // 'due' | 'deadline'
 
   const task = $derived(detail?.task);
   const project = $derived(task ? projectById(task.project_id) : null);
@@ -86,7 +88,7 @@
   }
 
   function onkeydown(e) {
-    if (e.key === 'Escape') close();
+    if (e.key === 'Escape' && !pickerFor) close();
   }
 
   async function save(fields) {
@@ -240,34 +242,26 @@
         ></textarea>
 
         <!-- fields -->
-        <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div>
             <div class={fieldLabel}><CalendarDays size={11} class="mr-1 inline" />Date</div>
-            <input
-              type="date"
-              value={task.due_date ?? ''}
-              onchange={(e) => save({ due_date: e.target.value || null })}
-              class="{fieldInput} mt-1"
-            />
-          </div>
-          <div>
-            <div class={fieldLabel}>Time</div>
-            <input
-              type="time"
-              value={task.due_time ?? ''}
-              disabled={!task.due_date}
-              onchange={(e) => save({ due_time: e.target.value || null })}
-              class="{fieldInput} mt-1 disabled:opacity-40"
-            />
+            <button
+              onclick={() => (pickerFor = 'due')}
+              class="{fieldInput} mt-1 text-left {task.due_date ? '' : 'text-zinc-400'}"
+            >
+              {task.due_date
+                ? `${dayLabel(task.due_date)}${task.due_time ? ` · ${fmtTime(task.due_time)}` : ''}`
+                : 'None'}
+            </button>
           </div>
           <div>
             <div class={fieldLabel}><Flag size={11} class="mr-1 inline" />Deadline</div>
-            <input
-              type="date"
-              value={task.deadline ?? ''}
-              onchange={(e) => save({ deadline: e.target.value || null })}
-              class="{fieldInput} mt-1"
-            />
+            <button
+              onclick={() => (pickerFor = 'deadline')}
+              class="{fieldInput} mt-1 text-left {task.deadline ? '' : 'text-zinc-400'}"
+            >
+              {task.deadline ? dayLabel(task.deadline) : 'None'}
+            </button>
           </div>
           <div>
             <div class={fieldLabel}>Priority</div>
@@ -421,3 +415,20 @@
     {/if}
   </div>
 </div>
+
+{#if task && pickerFor === 'due'}
+  <DatePicker
+    date={task.due_date}
+    time={task.due_time}
+    onselect={(due_date, due_time) => save({ due_date, due_time })}
+    onclose={() => (pickerFor = null)}
+  />
+{:else if task && pickerFor === 'deadline'}
+  <DatePicker
+    title="Deadline"
+    date={task.deadline}
+    allowsTime={false}
+    onselect={(deadline) => save({ deadline })}
+    onclose={() => (pickerFor = null)}
+  />
+{/if}
