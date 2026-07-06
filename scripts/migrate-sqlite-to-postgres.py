@@ -65,7 +65,12 @@ def main() -> int:
     conn.row_factory = sqlite3.Row
 
     print("BEGIN;")
-    print("SET CONSTRAINTS ALL DEFERRED;")
+    # The schema's foreign keys are not DEFERRABLE, and projects/tasks are
+    # self-referencing, so row order alone can violate parent_id constraints.
+    # Disabling FK triggers for the session is safe here: the source data
+    # already satisfied the same constraints in SQLite. Requires a superuser
+    # connection (the bootstrap user of the official postgres image is one).
+    print("SET session_replication_role = replica;")
     print(
         "TRUNCATE TABLE gcal_events, google_accounts, attachments, comments, tasks, "
         "api_keys, project_members, projects, sessions, users RESTART IDENTITY CASCADE;"
