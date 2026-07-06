@@ -4,11 +4,11 @@ info:
   version: 1.0.0
   summary: TooDue task, project, collaboration, and AI-assistant API.
   description: |
-    TooDue has one public integration API: the **API-key API**.
+    TooDue has one canonical API surface under `/api`.
 
-    Use `Authorization: Bearer tdue_...` with the endpoints documented here. API keys are created in the TooDue app, then used by agents, automations, MCP clients, scripts, and other external tools.
+    The web app and external integrations call the same resource endpoints. Browser sessions authenticate with the `toodue_session` cookie; external integrations should authenticate with `Authorization: Bearer tdue_...` API keys created in the TooDue app.
 
-    The TooDue web app also uses private cookie-authenticated endpoints internally. Those are intentionally not the public integration contract; treat the API-key endpoints here as the stable surface.
+    The legacy `/api/ai/*` aliases remain for compatibility, but new clients should use the canonical endpoints documented here.
   contact:
     name: TooDue
     url: https://toodue.com
@@ -23,18 +23,17 @@ externalDocs:
   url: https://app.toodue.com
 tags:
 - name: Public API
-  description: API-key authenticated endpoints for agents, automations, and integrations.
+  description: Canonical task and project endpoints. Use bearer API keys for external integrations; browser sessions use the same endpoints with cookies.
 security:
 - BearerApiKey: []
+- SessionCookie: []
 paths:
-  "/ai/me":
+  "/me":
     get:
       tags:
       - Public API
-      summary: Get the API-key owner
-      operationId: aiMe
-      security:
-      - BearerApiKey: []
+      summary: Get the current user
+      operationId: me
       responses:
         '200':
           description: Current API user.
@@ -44,14 +43,12 @@ paths:
                 "$ref": "#/components/schemas/User"
         '401':
           "$ref": "#/components/responses/Unauthorized"
-  "/ai/projects":
+  "/projects":
     get:
       tags:
       - Public API
-      summary: List projects visible to the API-key owner
-      operationId: aiListProjects
-      security:
-      - BearerApiKey: []
+      summary: List projects visible to the current user
+      operationId: listProjects
       responses:
         '200':
           description: Projects including member lists.
@@ -67,9 +64,7 @@ paths:
       tags:
       - Public API
       summary: Create a project
-      operationId: aiCreateProject
-      security:
-      - BearerApiKey: []
+      operationId: createProject
       requestBody:
         required: true
         content:
@@ -93,14 +88,12 @@ paths:
           "$ref": "#/components/responses/BadRequest"
         '401':
           "$ref": "#/components/responses/Unauthorized"
-  "/ai/projects/{id}":
+  "/projects/{id}":
     get:
       tags:
       - Public API
       summary: Get one project
-      operationId: aiGetProject
-      security:
-      - BearerApiKey: []
+      operationId: getProject
       parameters:
       - "$ref": "#/components/parameters/ProjectId"
       responses:
@@ -116,14 +109,12 @@ paths:
           "$ref": "#/components/responses/Forbidden"
         '404':
           "$ref": "#/components/responses/NotFound"
-  "/ai/tasks":
+  "/tasks":
     get:
       tags:
       - Public API
       summary: List active or completed tasks
-      operationId: aiListTasks
-      security:
-      - BearerApiKey: []
+      operationId: listTasks
       parameters:
       - "$ref": "#/components/parameters/ProjectIdQuery"
       - name: completed
@@ -146,9 +137,7 @@ paths:
       tags:
       - Public API
       summary: Create a task or subtask
-      operationId: aiCreateTask
-      security:
-      - BearerApiKey: []
+      operationId: createTask
       requestBody:
         required: true
         content:
@@ -176,14 +165,12 @@ paths:
           "$ref": "#/components/responses/BadRequest"
         '401':
           "$ref": "#/components/responses/Unauthorized"
-  "/ai/tasks/search":
+  "/tasks/search":
     get:
       tags:
       - Public API
       summary: Search active tasks by name or description
-      operationId: aiSearchTasks
-      security:
-      - BearerApiKey: []
+      operationId: searchTasks
       parameters:
       - name: q
         in: query
@@ -212,14 +199,12 @@ paths:
           "$ref": "#/components/responses/BadRequest"
         '401':
           "$ref": "#/components/responses/Unauthorized"
-  "/ai/tasks/{id}":
+  "/tasks/{id}":
     get:
       tags:
       - Public API
       summary: Get task details
-      operationId: aiGetTask
-      security:
-      - BearerApiKey: []
+      operationId: getTask
       parameters:
       - "$ref": "#/components/parameters/TaskId"
       responses:
@@ -239,9 +224,7 @@ paths:
       tags:
       - Public API
       summary: Update a task
-      operationId: aiUpdateTask
-      security:
-      - BearerApiKey: []
+      operationId: updateTask
       parameters:
       - "$ref": "#/components/parameters/TaskId"
       requestBody:
@@ -277,9 +260,7 @@ paths:
       tags:
       - Public API
       summary: Delete a task
-      operationId: aiDeleteTask
-      security:
-      - BearerApiKey: []
+      operationId: deleteTask
       parameters:
       - "$ref": "#/components/parameters/TaskId"
       responses:
@@ -298,6 +279,11 @@ components:
       scheme: bearer
       bearerFormat: tdue API key
       description: API keys start with `tdue_` and are created in the TooDue app.
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: toodue_session
+      description: Browser session cookie used by the TooDue web app.
   parameters:
     ProjectId:
       name: id

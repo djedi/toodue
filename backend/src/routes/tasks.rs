@@ -96,6 +96,39 @@ pub async fn list(
     Ok(Json(tasks))
 }
 
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    pub q: String,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+pub async fn search(
+    State(st): State<AppState>,
+    AuthUser(user): AuthUser,
+    Query(q): Query<SearchQuery>,
+) -> ApiResult<Json<Vec<Task>>> {
+    let needle = q.q.trim();
+    if needle.is_empty() {
+        return Err(ApiError::bad_request("q is required"));
+    }
+    let sql = format!(
+        "SELECT {TASK_COLS} FROM tasks t WHERE t.project_id IN \
+         (SELECT project_id FROM project_members WHERE user_id = ?) \
+         AND t.completed_at IS NULL AND (t.name LIKE ? OR t.description LIKE ?) \
+         ORDER BY t.updated_at DESC LIMIT ?"
+    );
+    let pattern = format!("%{needle}%");
+    let tasks = sqlx::query_as::<_, Task>(&*crate::db::sql(&sql))
+        .bind(user.id)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(q.limit.unwrap_or(25).clamp(1, 100))
+        .fetch_all(&st.db.pool)
+        .await?;
+    Ok(Json(tasks))
+}
+
 pub async fn detail(
     State(st): State<AppState>,
     AuthUser(user): AuthUser,

@@ -62,6 +62,46 @@ pub struct AuthUser(pub User);
 #[derive(Clone)]
 pub struct ApiUser(pub User);
 
+async fn user_from_bearer(st: &AppState, headers: &HeaderMap) -> ApiResult<Option<User>> {
+    let Some(token) = bearer_token(headers) else {
+        return Ok(None);
+    };
+    let token_hash = hash_token(&token);
+    let user = sqlx::query_as::<_, User>(&*crate::db::sql(
+        "SELECT u.id, u.email, u.name FROM api_keys k \
+         JOIN users u ON u.id = k.user_id WHERE k.token_hash = ?",
+    ))
+    .bind(&token_hash)
+    .fetch_optional(&st.db.pool)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
+    sqlx::query(&*crate::db::sql(
+        "UPDATE api_keys SET last_used_at = ? WHERE token_hash = ?",
+    ))
+    .bind(now_iso())
+    .bind(&token_hash)
+    .execute(&st.db.pool)
+    .await?;
+    Ok(Some(user))
+}
+
+async fn user_from_cookie(st: &AppState, headers: &HeaderMap) -> ApiResult<Option<User>> {
+    let Some(token) = cookie_token(headers) else {
+        return Ok(None);
+    };
+    let user = sqlx::query_as::<_, User>(&*crate::db::sql(
+        "SELECT u.id, u.email, u.name FROM sessions s \
+         JOIN users u ON u.id = s.user_id \
+         WHERE s.token = ? AND s.expires_at > ?",
+    ))
+    .bind(&token)
+    .bind(now_iso())
+    .fetch_optional(&st.db.pool)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
+    Ok(Some(user))
+}
+
 impl<S> FromRequestParts<S> for AuthUser
 where
     AppState: FromRef<S>,
@@ -71,18 +111,13 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let st = AppState::from_ref(state);
-        let token = cookie_token(&parts.headers).ok_or_else(ApiError::unauthorized)?;
-        let user = sqlx::query_as::<_, User>(&*crate::db::sql(
-            "SELECT u.id, u.email, u.name FROM sessions s \
-             JOIN users u ON u.id = s.user_id \
-             WHERE s.token = ? AND s.expires_at > ?",
-        ))
-        .bind(&token)
-        .bind(now_iso())
-        .fetch_optional(&st.db.pool)
-        .await?
-        .ok_or_else(ApiError::unauthorized)?;
-        Ok(AuthUser(user))
+        if let Some(user) = user_from_bearer(&st, &parts.headers).await? {
+            return Ok(AuthUser(user));
+        }
+        if let Some(user) = user_from_cookie(&st, &parts.headers).await? {
+            return Ok(AuthUser(user));
+        }
+        Err(ApiError::unauthorized())
     }
 }
 
@@ -95,23 +130,9 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let st = AppState::from_ref(state);
-        let token = bearer_token(&parts.headers).ok_or_else(ApiError::unauthorized)?;
-        let token_hash = hash_token(&token);
-        let user = sqlx::query_as::<_, User>(&*crate::db::sql(
-            "SELECT u.id, u.email, u.name FROM api_keys k \
-             JOIN users u ON u.id = k.user_id WHERE k.token_hash = ?",
-        ))
-        .bind(&token_hash)
-        .fetch_optional(&st.db.pool)
-        .await?
-        .ok_or_else(ApiError::unauthorized)?;
-        sqlx::query(&*crate::db::sql(
-            "UPDATE api_keys SET last_used_at = ? WHERE token_hash = ?",
-        ))
-        .bind(now_iso())
-        .bind(&token_hash)
-        .execute(&st.db.pool)
-        .await?;
+        let user = user_from_bearer(&st, &parts.headers)
+            .await?
+            .ok_or_else(ApiError::unauthorized)?;
         Ok(ApiUser(user))
     }
 }

@@ -64,6 +64,7 @@ async fn main() {
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
+        .route("/me", get(auth::me))
         .route(
             "/api-keys",
             get(routes::api_keys::list).post(routes::api_keys::create),
@@ -105,6 +106,7 @@ async fn main() {
             "/tasks",
             get(routes::tasks::list).post(routes::tasks::create),
         )
+        .route("/tasks/search", get(routes::tasks::search))
         .route(
             "/tasks/{id}",
             get(routes::tasks::detail)

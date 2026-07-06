@@ -1,13 +1,12 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::auth::ApiUser;
-use crate::error::{ApiError, ApiResult};
+use crate::error::ApiResult;
 use crate::models::Task;
 use crate::routes::projects::{project_json, require_member, CreateProject};
-use crate::routes::tasks::{CreateTask, ListQuery, UpdateTask, TASK_COLS};
+use crate::routes::tasks::{CreateTask, ListQuery, UpdateTask};
 use crate::AppState;
 
 pub async fn me(ApiUser(user): ApiUser) -> Json<Value> {
@@ -62,37 +61,12 @@ pub async fn delete_task(
     crate::routes::tasks::remove(State(st), crate::auth::AuthUser(user), Path(id)).await
 }
 
-#[derive(Deserialize)]
-pub struct SearchQuery {
-    pub q: String,
-    #[serde(default)]
-    pub limit: Option<i64>,
-}
-
 pub async fn search_tasks(
     State(st): State<AppState>,
     ApiUser(user): ApiUser,
-    Query(q): Query<SearchQuery>,
+    Query(q): Query<crate::routes::tasks::SearchQuery>,
 ) -> ApiResult<Json<Vec<Task>>> {
-    let needle = q.q.trim();
-    if needle.is_empty() {
-        return Err(ApiError::bad_request("q is required"));
-    }
-    let sql = format!(
-        "SELECT {TASK_COLS} FROM tasks t WHERE t.project_id IN \
-         (SELECT project_id FROM project_members WHERE user_id = ?) \
-         AND t.completed_at IS NULL AND (t.name LIKE ? OR t.description LIKE ?) \
-         ORDER BY t.updated_at DESC LIMIT ?"
-    );
-    let pattern = format!("%{needle}%");
-    let tasks = sqlx::query_as::<_, Task>(&*crate::db::sql(&sql))
-        .bind(user.id)
-        .bind(&pattern)
-        .bind(&pattern)
-        .bind(q.limit.unwrap_or(25).clamp(1, 100))
-        .fetch_all(&st.db.pool)
-        .await?;
-    Ok(Json(tasks))
+    crate::routes::tasks::search(State(st), crate::auth::AuthUser(user), Query(q)).await
 }
 
 pub async fn task_detail(
