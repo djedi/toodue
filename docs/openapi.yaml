@@ -4,12 +4,11 @@ info:
   version: 1.0.0
   summary: TooDue task, project, collaboration, and AI-assistant API.
   description: |
-    TooDue exposes two API surfaces:
+    TooDue has one public integration API: the **API-key API**.
 
-    - **App/session API** under `/api/*`, authenticated with the `toodue_session` HTTP-only cookie created by `/api/auth/login` or `/api/auth/register`.
-    - **AI/API-key API** under `/api/ai/*`, authenticated with `Authorization: Bearer tdue_...` API keys created inside the TooDue app.
+    Use `Authorization: Bearer tdue_...` with the endpoints documented here. API keys are created in the TooDue app, then used by agents, automations, MCP clients, scripts, and other external tools.
 
-    The AI/API-key endpoints are the recommended integration surface for agents, automations, and external tools. Session endpoints are documented because the web app uses them and API keys are managed there.
+    The TooDue web app also uses private cookie-authenticated endpoints internally. Those are intentionally not the public integration contract; treat the API-key endpoints here as the stable surface.
   contact:
     name: TooDue
     url: https://toodue.com
@@ -23,8 +22,8 @@ externalDocs:
   description: TooDue app
   url: https://app.toodue.com
 tags:
-  - name: AI API
-    description: API-key authenticated endpoints for agents and integrations.
+  - name: Public API
+    description: API-key authenticated endpoints for agents, automations, and integrations.
   - name: Auth
     description: Session registration, login, logout, and current user endpoints.
   - name: API Keys
@@ -42,7 +41,7 @@ security:
 paths:
   /ai/me:
     get:
-      tags: [AI API]
+      tags: [Public API]
       summary: Get the API-key owner
       operationId: aiMe
       security:
@@ -58,7 +57,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /ai/projects:
     get:
-      tags: [AI API]
+      tags: [Public API]
       summary: List projects visible to the API-key owner
       operationId: aiListProjects
       security:
@@ -75,7 +74,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
     post:
-      tags: [AI API]
+      tags: [Public API]
       summary: Create a project
       operationId: aiCreateProject
       security:
@@ -105,7 +104,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /ai/projects/{id}:
     get:
-      tags: [AI API]
+      tags: [Public API]
       summary: Get one project
       operationId: aiGetProject
       security:
@@ -127,7 +126,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /ai/tasks:
     get:
-      tags: [AI API]
+      tags: [Public API]
       summary: List active or completed tasks
       operationId: aiListTasks
       security:
@@ -151,7 +150,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
     post:
-      tags: [AI API]
+      tags: [Public API]
       summary: Create a task or subtask
       operationId: aiCreateTask
       security:
@@ -185,7 +184,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /ai/tasks/search:
     get:
-      tags: [AI API]
+      tags: [Public API]
       summary: Search active tasks by name or description
       operationId: aiSearchTasks
       security:
@@ -220,7 +219,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /ai/tasks/{id}:
     get:
-      tags: [AI API]
+      tags: [Public API]
       summary: Get task details
       operationId: aiGetTask
       security:
@@ -241,7 +240,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
-      tags: [AI API]
+      tags: [Public API]
       summary: Update a task
       operationId: aiUpdateTask
       security:
@@ -278,7 +277,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
-      tags: [AI API]
+      tags: [Public API]
       summary: Delete a task
       operationId: aiDeleteTask
       security:
@@ -1012,7 +1011,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: tdue API key
-      description: API keys start with `tdue_` and are managed in the TooDue app.
+      description: API keys start with `tdue_` and are created in the TooDue app.
   parameters:
     ProjectId:
       name: id
