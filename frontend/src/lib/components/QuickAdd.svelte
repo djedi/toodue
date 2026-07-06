@@ -1,6 +1,7 @@
 <script>
   import { data, ui, addTask, inboxProject, toast } from '../state.svelte.js';
-  import { todayStr } from '../dates.js';
+  import { dayLabel, fmtTime } from '../dates.js';
+  import DatePicker from './DatePicker.svelte';
   import { CalendarDays, Flag, X } from '@lucide/svelte';
 
   let name = $state('');
@@ -16,6 +17,7 @@
   );
   let busy = $state(false);
   let nameInput = $state(null);
+  let pickerFor = $state(null); // 'due' | 'deadline'
 
   $effect(() => {
     nameInput?.focus();
@@ -50,7 +52,7 @@
   }
 
   function onkeydown(e) {
-    if (e.key === 'Escape') close();
+    if (e.key === 'Escape' && !pickerFor) close();
   }
 
   const chip =
@@ -88,24 +90,14 @@
     ></textarea>
 
     <div class="mt-2 flex flex-wrap items-center gap-2">
-      <label class={chip}>
+      <button type="button" class={chip} onclick={() => (pickerFor = 'due')}>
         <CalendarDays size={14} class="text-emerald-600" />
-        <input type="date" bind:value={due_date} class="bg-transparent outline-none" />
-        {#if !due_date}
-          <button type="button" class="text-emerald-600" onclick={() => (due_date = todayStr())}>
-            Today
-          </button>
-        {/if}
-      </label>
-      {#if due_date}
-        <label class={chip}>
-          <input type="time" bind:value={due_time} class="bg-transparent outline-none" />
-        </label>
-      {/if}
-      <label class={chip} title="Deadline">
+        {due_date ? `${dayLabel(due_date)}${due_time ? ` · ${fmtTime(due_time)}` : ''}` : 'Date'}
+      </button>
+      <button type="button" class={chip} title="Deadline" onclick={() => (pickerFor = 'deadline')}>
         <Flag size={14} class="text-amber-600" />
-        <input type="date" bind:value={deadline} class="bg-transparent outline-none" />
-      </label>
+        {deadline ? dayLabel(deadline) : 'Deadline'}
+      </button>
       <select
         bind:value={priority}
         class="{chip} bg-transparent outline-none"
@@ -137,3 +129,23 @@
     </div>
   </form>
 </div>
+
+{#if pickerFor === 'due'}
+  <DatePicker
+    date={due_date || null}
+    time={due_time || null}
+    onselect={(d, t) => {
+      due_date = d ?? '';
+      due_time = t ?? '';
+    }}
+    onclose={() => (pickerFor = null)}
+  />
+{:else if pickerFor === 'deadline'}
+  <DatePicker
+    title="Deadline"
+    date={deadline || null}
+    allowsTime={false}
+    onselect={(d) => (deadline = d ?? '')}
+    onclose={() => (pickerFor = null)}
+  />
+{/if}
