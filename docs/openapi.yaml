@@ -1,0 +1,1491 @@
+openapi: 3.1.0
+info:
+  title: TooDue API
+  version: 1.0.0
+  summary: TooDue task, project, collaboration, and AI-assistant API.
+  description: |
+    TooDue exposes two API surfaces:
+
+    - **App/session API** under `/api/*`, authenticated with the `toodue_session` HTTP-only cookie created by `/api/auth/login` or `/api/auth/register`.
+    - **AI/API-key API** under `/api/ai/*`, authenticated with `Authorization: Bearer tdue_...` API keys created inside the TooDue app.
+
+    The AI/API-key endpoints are the recommended integration surface for agents, automations, and external tools. Session endpoints are documented because the web app uses them and API keys are managed there.
+  contact:
+    name: TooDue
+    url: https://toodue.com
+  license:
+    name: Proprietary
+    url: https://toodue.com
+servers:
+  - url: https://app.toodue.com/api
+    description: Production API
+externalDocs:
+  description: TooDue app
+  url: https://app.toodue.com
+tags:
+  - name: AI API
+    description: API-key authenticated endpoints for agents and integrations.
+  - name: Auth
+    description: Session registration, login, logout, and current user endpoints.
+  - name: API Keys
+    description: Manage bearer tokens for the AI/API-key API.
+  - name: Projects
+    description: Project CRUD, nesting, sharing, and ordering.
+  - name: Tasks
+    description: Task CRUD, subtasks, comments, attachments, and imports.
+  - name: Calendar
+    description: iCalendar and Google Calendar integration endpoints.
+  - name: Realtime
+    description: Server-sent event stream used by the web app.
+security:
+  - SessionCookie: []
+paths:
+  /ai/me:
+    get:
+      tags: [AI API]
+      summary: Get the API-key owner
+      operationId: aiMe
+      security:
+        - BearerApiKey: []
+      responses:
+        '200':
+          description: Current API user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /ai/projects:
+    get:
+      tags: [AI API]
+      summary: List projects visible to the API-key owner
+      operationId: aiListProjects
+      security:
+        - BearerApiKey: []
+      responses:
+        '200':
+          description: Projects including member lists.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectWithMembers'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [AI API]
+      summary: Create a project
+      operationId: aiCreateProject
+      security:
+        - BearerApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+            examples:
+              default:
+                value:
+                  name: Follow up
+                  color: blue
+                  parent_id: null
+      responses:
+        '200':
+          description: Created project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectWithMembers'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /ai/projects/{id}:
+    get:
+      tags: [AI API]
+      summary: Get one project
+      operationId: aiGetProject
+      security:
+        - BearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project including members.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectWithMembers'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /ai/tasks:
+    get:
+      tags: [AI API]
+      summary: List active or completed tasks
+      operationId: aiListTasks
+      security:
+        - BearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdQuery'
+        - name: completed
+          in: query
+          description: When true with `project_id`, returns completed tasks for that project. Otherwise returns active tasks.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Matching tasks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [AI API]
+      summary: Create a task or subtask
+      operationId: aiCreateTask
+      security:
+        - BearerApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTask'
+            examples:
+              task:
+                value:
+                  project_id: 1
+                  name: Call the plumber
+                  description: Ask about the upstairs sink.
+                  due_date: '2026-07-07'
+                  due_time: '14:30'
+                  deadline: '2026-07-10'
+                  priority: 3
+      responses:
+        '200':
+          description: Created task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /ai/tasks/search:
+    get:
+      tags: [AI API]
+      summary: Search active tasks by name or description
+      operationId: aiSearchTasks
+      security:
+        - BearerApiKey: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search text. Must not be blank.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum results, clamped from 1 to 100. Defaults to 25.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        '200':
+          description: Search results ordered by most recently updated.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /ai/tasks/{id}:
+    get:
+      tags: [AI API]
+      summary: Get task details
+      operationId: aiGetTask
+      security:
+        - BearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Task plus subtasks, comments, and attachments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [AI API]
+      summary: Update a task
+      operationId: aiUpdateTask
+      security:
+        - BearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTask'
+            examples:
+              complete:
+                value:
+                  completed: true
+              reschedule:
+                value:
+                  due_date: '2026-07-08'
+                  due_time: null
+      responses:
+        '200':
+          description: Updated task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [AI API]
+      summary: Delete a task
+      operationId: aiDeleteTask
+      security:
+        - BearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a user and start a session
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: Registered user. Also sets `toodue_session` cookie.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in and start a session
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged-in user. Also sets `toodue_session` cookie.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Delete the current session
+      operationId: logout
+      responses:
+        '200':
+          description: Session cookie cleared.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the current session user
+      operationId: me
+      responses:
+        '200':
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api-keys:
+    get:
+      tags: [API Keys]
+      summary: List API keys for the current user
+      operationId: listApiKeys
+      responses:
+        '200':
+          description: API keys. Full key values are only returned at creation time.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiKeyInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [API Keys]
+      summary: Create an API key
+      operationId: createApiKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApiKey'
+      responses:
+        '200':
+          description: Created key. Save the `key` value; it is not shown again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedApiKey'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api-keys/{id}:
+    delete:
+      tags: [API Keys]
+      summary: Revoke an API key
+      operationId: deleteApiKey
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List projects visible to the current session user
+      operationId: listProjects
+      responses:
+        '200':
+          description: Projects including members.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectWithMembers'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Projects]
+      summary: Create a project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+      responses:
+        '200':
+          description: Created project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectWithMembers'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /projects/{id}:
+    patch:
+      tags: [Projects]
+      summary: Update a project
+      operationId: updateProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProject'
+      responses:
+        '200':
+          description: Updated project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectWithMembers'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      operationId: deleteProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /projects/reorder:
+    post:
+      tags: [Projects]
+      summary: Reorder and re-parent projects
+      operationId: reorderProjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReorderProjects'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /projects/share-bulk:
+    post:
+      tags: [Projects]
+      summary: Share multiple projects with a user by email
+      operationId: shareProjectsBulk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkShareProjects'
+      responses:
+        '200':
+          description: Share result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkShareResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /projects/{id}/share:
+    post:
+      tags: [Projects]
+      summary: Share a project with a user by email
+      operationId: shareProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareProject'
+      responses:
+        '200':
+          description: Shared project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectWithMembers'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /projects/{id}/members/{user_id}:
+    delete:
+      tags: [Projects]
+      summary: Remove a member from a project
+      operationId: removeProjectMember
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Updated project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectWithMembers'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /tasks:
+    get:
+      tags: [Tasks]
+      summary: List active or completed tasks
+      operationId: listTasks
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdQuery'
+        - name: completed
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Matching tasks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Tasks]
+      summary: Create a task or subtask
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTask'
+      responses:
+        '200':
+          description: Created task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /tasks/{id}:
+    get:
+      tags: [Tasks]
+      summary: Get task details
+      operationId: getTask
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Task plus subtasks, comments, and attachments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Tasks]
+      summary: Update a task
+      operationId: updateTask
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTask'
+      responses:
+        '200':
+          description: Updated task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Tasks]
+      summary: Delete a task
+      operationId: deleteTask
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /tasks/{id}/comments:
+    post:
+      tags: [Tasks]
+      summary: Add a comment to a task
+      operationId: createComment
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateComment'
+      responses:
+        '200':
+          description: Created comment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /comments/{id}:
+    delete:
+      tags: [Tasks]
+      summary: Delete a comment
+      operationId: deleteComment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /tasks/{id}/attachments:
+    post:
+      tags: [Tasks]
+      summary: Upload an attachment to a task
+      operationId: uploadAttachment
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Uploaded attachment metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /attachments/{id}:
+    get:
+      tags: [Tasks]
+      summary: Download an attachment
+      operationId: downloadAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Binary attachment content.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Tasks]
+      summary: Delete an attachment
+      operationId: deleteAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /import/todoist:
+    post:
+      tags: [Tasks]
+      summary: Import tasks from a Todoist export zip
+      operationId: importTodoist
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Import summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /events:
+    get:
+      tags: [Realtime]
+      summary: Open the authenticated server-sent event stream
+      operationId: events
+      responses:
+        '200':
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /calendar/{token}:
+    get:
+      tags: [Calendar]
+      summary: Public iCalendar feed by secret token
+      operationId: calendarFeed
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: iCalendar feed.
+          content:
+            text/calendar:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/calendar:
+    get:
+      tags: [Calendar]
+      summary: Get the current user's iCalendar feed URL
+      operationId: getCalendarUrl
+      responses:
+        '200':
+          description: Calendar URL payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    format: uri
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Calendar]
+      summary: Rotate the current user's iCalendar feed token
+      operationId: rotateCalendarUrl
+      responses:
+        '200':
+          description: New calendar URL payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    format: uri
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /google/status:
+    get:
+      tags: [Calendar]
+      summary: Get Google Calendar connection status
+      operationId: googleStatus
+      responses:
+        '200':
+          description: Google Calendar status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /google/connect:
+    get:
+      tags: [Calendar]
+      summary: Start Google Calendar OAuth
+      operationId: googleConnect
+      responses:
+        '200':
+          description: OAuth start response.
+        '302':
+          description: Redirect to Google OAuth.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /google/callback:
+    get:
+      tags: [Calendar]
+      summary: Google OAuth callback
+      operationId: googleCallback
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OAuth callback response.
+        '302':
+          description: Redirect back to the app.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /google/disconnect:
+    post:
+      tags: [Calendar]
+      summary: Disconnect Google Calendar
+      operationId: googleDisconnect
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /google/webhook:
+    post:
+      tags: [Calendar]
+      summary: Google Calendar push notification webhook
+      operationId: googleWebhook
+      security: []
+      responses:
+        '200':
+          description: Notification accepted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: toodue_session
+      description: Session cookie set by `/auth/login` or `/auth/register`.
+    BearerApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: tdue API key
+      description: API keys start with `tdue_` and are managed in the TooDue app.
+  parameters:
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    TaskId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    ProjectIdQuery:
+      name: project_id
+      in: query
+      schema:
+        type: integer
+        format: int64
+      description: Restrict results to one project.
+  responses:
+    Ok:
+      description: Operation succeeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Ok'
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication is missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The authenticated user cannot access the requested resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Ok:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          examples: [unauthorized]
+    User:
+      type: object
+      required: [id, email, name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          format: password
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    ApiKeyInfo:
+      type: object
+      required: [id, name, prefix, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        prefix:
+          type: string
+          examples: [tdue_abcdefg]
+        last_used_at:
+          type: [string, 'null']
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    CreateApiKey:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    CreatedApiKey:
+      type: object
+      required: [api_key, key]
+      properties:
+        api_key:
+          $ref: '#/components/schemas/ApiKeyInfo'
+        key:
+          type: string
+          description: Full bearer token. Returned only once.
+          examples: [tdue_0123456789abcdef]
+    Project:
+      type: object
+      required: [id, name, color, owner_id, is_inbox, sort_order, created_at, active_count]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        color:
+          type: string
+          examples: [slate, blue, emerald, rose]
+        parent_id:
+          type: [integer, 'null']
+          format: int64
+        owner_id:
+          type: integer
+          format: int64
+        is_inbox:
+          type: integer
+          description: 1 for the built-in Inbox, otherwise 0.
+          enum: [0, 1]
+        sort_order:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        active_count:
+          type: integer
+          format: int64
+    ProjectWithMembers:
+      allOf:
+        - $ref: '#/components/schemas/Project'
+        - type: object
+          required: [members]
+          properties:
+            members:
+              type: array
+              items:
+                $ref: '#/components/schemas/Member'
+    Member:
+      type: object
+      required: [id, name, email, role, project_id]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [owner, member]
+        project_id:
+          type: integer
+          format: int64
+    CreateProject:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+          default: slate
+        parent_id:
+          type: [integer, 'null']
+          format: int64
+    UpdateProject:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+        parent_id:
+          type: [integer, 'null']
+          format: int64
+          description: Send null to remove the parent.
+    ReorderProjects:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [id, sort_order]
+            properties:
+              id:
+                type: integer
+                format: int64
+              parent_id:
+                type: [integer, 'null']
+                format: int64
+              sort_order:
+                type: integer
+                format: int64
+    ShareProject:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    BulkShareProjects:
+      type: object
+      required: [email, project_ids]
+      properties:
+        email:
+          type: string
+          format: email
+        project_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: integer
+            format: int64
+    BulkShareResult:
+      type: object
+      required: [shared, already_shared, skipped, projects]
+      properties:
+        shared:
+          type: array
+          items:
+            type: integer
+            format: int64
+        already_shared:
+          type: array
+          items:
+            type: integer
+            format: int64
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [id, reason]
+            properties:
+              id:
+                type: integer
+                format: int64
+              reason:
+                type: string
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectWithMembers'
+    Task:
+      type: object
+      required: [id, project_id, creator_id, name, description, priority, sort_order, created_at, updated_at, comment_count, attachment_count, subtask_count, subtask_done_count]
+      properties:
+        id:
+          type: integer
+          format: int64
+        project_id:
+          type: integer
+          format: int64
+        parent_id:
+          type: [integer, 'null']
+          format: int64
+        creator_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        description:
+          type: string
+        due_date:
+          type: [string, 'null']
+          format: date
+        due_time:
+          type: [string, 'null']
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          examples: ['14:30']
+        deadline:
+          type: [string, 'null']
+          format: date
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 4
+          description: 1 is highest priority; 4 is normal/default.
+        completed_at:
+          type: [string, 'null']
+          format: date-time
+        sort_order:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        comment_count:
+          type: integer
+          format: int64
+        attachment_count:
+          type: integer
+          format: int64
+        subtask_count:
+          type: integer
+          format: int64
+        subtask_done_count:
+          type: integer
+          format: int64
+    TaskDetail:
+      type: object
+      required: [task, subtasks, comments, attachments]
+      properties:
+        task:
+          $ref: '#/components/schemas/Task'
+        subtasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+    CreateTask:
+      type: object
+      required: [name]
+      properties:
+        project_id:
+          type: integer
+          format: int64
+          description: Required unless `parent_id` is provided.
+        parent_id:
+          type: integer
+          format: int64
+          description: Parent task id when creating a subtask. Inherits the parent project.
+        name:
+          type: string
+        description:
+          type: string
+          default: ''
+        due_date:
+          type: [string, 'null']
+          format: date
+        due_time:
+          type: [string, 'null']
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+        deadline:
+          type: [string, 'null']
+          format: date
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 4
+          default: 4
+    UpdateTask:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        due_date:
+          type: [string, 'null']
+          format: date
+          description: Send null to clear.
+        due_time:
+          type: [string, 'null']
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: Send null to clear.
+        deadline:
+          type: [string, 'null']
+          format: date
+          description: Send null to clear.
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 4
+        completed:
+          type: boolean
+          description: true completes the task; false reopens it.
+        project_id:
+          type: integer
+          format: int64
+          description: Move the task to another project.
+    Comment:
+      type: object
+      required: [id, task_id, user_id, user_name, body, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        task_id:
+          type: integer
+          format: int64
+        user_id:
+          type: integer
+          format: int64
+        user_name:
+          type: string
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateComment:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+    Attachment:
+      type: object
+      required: [id, task_id, user_id, filename, mime, size, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        task_id:
+          type: integer
+          format: int64
+        user_id:
+          type: integer
+          format: int64
+        filename:
+          type: string
+        mime:
+          type: string
+        size:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
