@@ -1,6 +1,6 @@
 # TooDue
 
-A fast, open-source Todoist alternative you can self-host. Rust backend, Svelte PWA frontend,
+A fast, open-source task manager you can self-host. Rust backend, Svelte PWA frontend,
 real-time sync over SSE.
 
 ## Features
@@ -99,6 +99,6 @@ The URL contains a private token. If it leaks, rotate it with `POST /api/me/cale
 
 ## Roadmap
 
-- SaaS offering with subscriptions (cheaper than Todoist)
+- SaaS offering with fair, affordable subscriptions
 - Native iOS/Android apps
 - Labels, filters, reminders, recurring tasks

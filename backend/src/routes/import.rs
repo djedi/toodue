@@ -22,10 +22,10 @@ struct ParsedDate {
     recurring: bool,
 }
 
-/// Best-effort parse of Todoist's exported date strings: "Jun 29", "29 Jun 2027",
+/// Best-effort parse of exported date strings: "Jun 29", "29 Jun 2027",
 /// "Jun 29 09:00", "2026-06-29", or recurring rules like "every 27th".
-/// Years are omitted by Todoist when the date is in the current year.
-fn parse_todoist_date(raw: &str, today: NaiveDate) -> ParsedDate {
+/// Years may be omitted when the date is in the current year.
+fn parse_export_date(raw: &str, today: NaiveDate) -> ParsedDate {
     let s = raw.trim();
     if s.is_empty() {
         return ParsedDate::default();
@@ -118,7 +118,7 @@ async fn find_or_create_project(
     name: &str,
     created: &mut usize,
 ) -> ApiResult<i64> {
-    // Todoist's Inbox maps onto the TooDue inbox.
+    // Imported Inbox projects map onto the TooDue inbox.
     if name == "Inbox" {
         let row: Option<(i64,)> = sqlx::query_as(&*crate::db::sql(
             "SELECT id FROM projects WHERE owner_id = ? AND is_inbox = 1",
@@ -160,7 +160,7 @@ async fn find_or_create_project(
     Ok(id)
 }
 
-pub async fn todoist(
+pub async fn backup(
     State(st): State<AppState>,
     AuthUser(user): AuthUser,
     mut multipart: Multipart,
@@ -188,14 +188,15 @@ pub async fn todoist(
     // across the database awaits below.
     let mut csv_files: Vec<(String, String)> = Vec::new();
     {
-        let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
-            .map_err(|_| ApiError::bad_request("that doesn't look like a Todoist backup (.zip)"))?;
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| {
+            ApiError::bad_request("that doesn't look like a compatible task backup (.zip)")
+        })?;
         for i in 0..archive.len() {
             let mut file = archive
                 .by_index(i)
                 .map_err(|_| ApiError::bad_request("corrupt zip entry"))?;
-            // Decode names as UTF-8 ourselves: Todoist uses emoji-heavy names
-            // and the cp437 fallback would mangle them.
+            // Decode names as UTF-8 ourselves: emoji-heavy project names
+            // and the cp437 fallback would otherwise be mangled.
             let filename = String::from_utf8_lossy(&file.name_raw().to_vec()).into_owned();
             if file.is_dir() || !filename.to_lowercase().ends_with(".csv") {
                 continue;
@@ -229,7 +230,7 @@ pub async fn todoist(
             .clone();
         let col = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
         let (Some(c_type), Some(c_content)) = (col("TYPE"), col("CONTENT")) else {
-            continue; // not a Todoist project export
+            continue; // not a compatible project export
         };
         let c_desc = col("DESCRIPTION");
         let c_priority = col("PRIORITY");
@@ -263,12 +264,12 @@ pub async fn todoist(
                     }
                     let indent: i64 = get(c_indent).parse().unwrap_or(1);
                     let priority: i64 = get(c_priority).parse().unwrap_or(4).clamp(1, 4);
-                    let due = parse_todoist_date(get(c_date), today);
+                    let due = parse_export_date(get(c_date), today);
                     if due.recurring {
                         recurring += 1;
                     }
-                    let deadline = parse_todoist_date(get(c_deadline), today);
-                    // TooDue nests one level; deeper Todoist indents attach to
+                    let deadline = parse_export_date(get(c_deadline), today);
+                    // TooDue nests one level; deeper imported indents attach to
                     // the nearest top-level task so nothing gets hidden.
                     let parent_id = if indent > 1 { last_top_task } else { None };
                     sort_order += 1;

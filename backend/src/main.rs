@@ -124,8 +124,8 @@ async fn main() {
             get(routes::attachments::download).delete(routes::attachments::remove),
         )
         .route(
-            "/import/todoist",
-            post(routes::import::todoist).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
+            "/import/backup",
+            post(routes::import::backup).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
         )
         .route("/events", get(events::sse_handler))
         .route("/calendar/{token}", get(ics::feed))

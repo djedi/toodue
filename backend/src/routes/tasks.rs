@@ -347,7 +347,7 @@ pub async fn update(
     .execute(&st.db.pool)
     .await?;
 
-    // Completing a parent completes its remaining subtasks, like Todoist.
+    // Completing a parent completes its remaining subtasks.
     let mut completed_subtasks: Vec<i64> = Vec::new();
     if completing {
         let rows: Vec<(i64,)> = sqlx::query_as(&*crate::db::sql(

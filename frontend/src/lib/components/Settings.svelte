@@ -85,14 +85,14 @@
     if (e.key === 'Escape') close();
   }
 
-  async function importTodoist(e) {
+  async function importTaskBackup(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     importing = true;
     const form = new FormData();
     form.append('file', file);
     try {
-      const r = await api.post('/import/todoist', form);
+      const r = await api.post('/import/backup', form);
       await refresh();
       let msg = `Imported ${r.tasks} tasks across ${r.projects} projects`;
       if (r.comments) msg += `, ${r.comments} comments`;
@@ -214,10 +214,10 @@
         <FileUp size={18} class="text-zinc-400" />
         <span class="flex-1">
           <span class="block text-sm font-medium">
-            {importing ? 'Importing…' : 'Import from Todoist'}
+            {importing ? 'Importing…' : 'Import task backup'}
           </span>
           <span class="block text-xs text-zinc-400">
-            Upload a Todoist backup (.zip) to bring in your projects and tasks
+            Upload a compatible task backup (.zip) to bring in your projects and tasks
           </span>
         </span>
         <ChevronRight size={15} class="text-zinc-400" />
@@ -227,7 +227,7 @@
         type="file"
         accept=".zip"
         class="hidden"
-        onchange={importTodoist}
+        onchange={importTaskBackup}
       />
 
       <div class="rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
