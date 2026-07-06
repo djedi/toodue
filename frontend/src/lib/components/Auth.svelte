@@ -1,7 +1,7 @@
 <script>
   import { api } from '../api.js';
   import { data, afterSignIn } from '../state.svelte.js';
-  import { CircleCheckBig } from '@lucide/svelte';
+  import BrandLogo from './BrandLogo.svelte';
 
   let mode = $state('login');
   let name = $state('');
@@ -29,9 +29,8 @@
 
 <div class="flex min-h-dvh items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
   <div class="w-full max-w-sm">
-    <div class="mb-8 flex items-center justify-center gap-2">
-      <CircleCheckBig class="text-brand-600" size={32} />
-      <span class="text-3xl font-bold tracking-tight">TooDue</span>
+    <div class="mb-8 flex justify-center">
+      <BrandLogo size="lg" class="text-3xl" />
     </div>
 
     <div class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
