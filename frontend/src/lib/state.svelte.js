@@ -43,10 +43,15 @@ setUnauthorizedHandler(() => {
 
 /* ---------- theme ---------- */
 
+function systemPrefersDark() {
+  // Prefer an explicit light OS signal when available. Some embedded browsers can report
+  // dark aggressively; this keeps System aligned with macOS/iOS light mode when it says so.
+  if (matchMedia('(prefers-color-scheme: light)').matches) return false;
+  return matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
 export function applyTheme() {
-  const dark =
-    ui.theme === 'dark' ||
-    (ui.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const dark = ui.theme === 'dark' || (ui.theme === 'system' && systemPrefersDark());
   document.documentElement.classList.toggle('dark', dark);
 }
 
