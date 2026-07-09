@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS project_templates (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  color       TEXT NOT NULL DEFAULT 'slate',
+  tasks_json  TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS google_accounts (
   user_id            INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   access_token       TEXT NOT NULL,
@@ -107,6 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
 CREATE INDEX IF NOT EXISTS idx_members_user ON project_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_project_templates_owner ON project_templates(owner_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id);

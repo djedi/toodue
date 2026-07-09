@@ -19,6 +19,7 @@ export const data = $state({
   user: undefined, // undefined = booting, null = signed out
   projects: [],
   tasks: [],
+  templates: [],
   ready: false,
   offline: typeof navigator !== 'undefined' ? !navigator.onLine : false,
   syncPending: false
@@ -189,9 +190,10 @@ export async function afterSignIn() {
 
 export async function refresh() {
   try {
-    const [projects, tasks] = await Promise.all([api.get('/projects'), api.get('/tasks')]);
+    const [projects, tasks, templates] = await Promise.all([api.get('/projects'), api.get('/tasks'), api.get('/templates')]);
     data.projects = projects;
     data.tasks = tasks;
+    data.templates = templates;
     data.offline = false;
     saveCurrentSnapshot();
   } catch (err) {
@@ -220,6 +222,11 @@ export async function refreshProjects() {
     if (!isOfflineError(err)) throw err;
     markOffline();
   }
+}
+
+export async function refreshTemplates() {
+  if (!requireOnlineAction()) return;
+  data.templates = await api.get('/templates');
 }
 
 /* ---------- realtime ---------- */
@@ -400,6 +407,24 @@ export async function addProject(fields) {
     offlineToast();
     return p;
   }
+}
+
+export async function importTemplate(templateId, fields = {}) {
+  if (!requireOnlineAction()) throw new Error('Connection required');
+  const result = await api.post(`/templates/${encodeURIComponent(templateId)}/import`, fields);
+  upsert(data.projects, result.project);
+  await refreshTasks();
+  saveCurrentSnapshot();
+  return result;
+}
+
+export async function saveProjectAsTemplate(projectId, fields = {}) {
+  if (!requireOnlineAction()) throw new Error('Connection required');
+  const template = await api.post('/templates', { project_id: projectId, ...fields });
+  const i = data.templates.findIndex((t) => t.id === template.id);
+  if (i >= 0) data.templates[i] = template;
+  else data.templates = [...data.templates, template];
+  return template;
 }
 
 export async function updateProject(id, fields) {

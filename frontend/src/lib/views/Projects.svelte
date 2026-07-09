@@ -1,7 +1,7 @@
 <script>
-  import { data, navigate, addProject, reorderProjects, shareProjects, toast } from '../state.svelte.js';
+  import { data, navigate, addProject, reorderProjects, shareProjects, toast, importTemplate } from '../state.svelte.js';
   import { bulkShareMessage } from '../bulkShare.js';
-  import { Hash, Plus, Users, ChevronRight, GripVertical, UserPlus, X } from '@lucide/svelte';
+  import { Hash, Plus, Users, ChevronRight, GripVertical, UserPlus, X, ClipboardList } from '@lucide/svelte';
 
   const INDENT = 24; // px per nesting level; dragging this far sideways changes depth
 
@@ -32,8 +32,26 @@
   let bulkEmail = $state('');
   let bulkBusy = $state(false);
   let selectedProjectIds = $state(new Set());
+  let templatesOpen = $state(false);
+  let importingTemplateId = $state(null);
+  let templateProjectName = $state('');
 
   const selectedCount = $derived(selectedProjectIds.size);
+
+  async function useTemplate(template) {
+    importingTemplateId = template.id;
+    try {
+      const result = await importTemplate(template.id, { name: templateProjectName.trim() || template.name });
+      templatesOpen = false;
+      templateProjectName = '';
+      navigate('project', result.project.id);
+      toast(`Created ${result.project.name} from template.`);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      importingTemplateId = null;
+    }
+  }
 
   function selectableProjectIds() {
     return rows.map((r) => r.p.id);
@@ -196,6 +214,13 @@
       </button>
     {/if}
     <button
+      aria-label="Browse templates"
+      onclick={() => (templatesOpen = true)}
+      class="rounded p-1.5 text-zinc-400 hover:text-brand-600"
+    >
+      <ClipboardList size={19} />
+    </button>
+    <button
       aria-label="Add project"
       onclick={() => (adding = !adding)}
       class="rounded p-1.5 text-zinc-400 hover:text-brand-600"
@@ -213,6 +238,62 @@
       class="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-zinc-700"
     />
   </form>
+{/if}
+
+{#if templatesOpen}
+  <div
+    class="fixed inset-0 z-40 flex items-end justify-center bg-black/40 sm:items-center sm:p-6"
+    role="presentation"
+    onclick={(e) => e.target === e.currentTarget && (templatesOpen = false)}
+  >
+    <div class="w-full rounded-t-2xl bg-white p-5 shadow-xl sm:max-w-lg sm:rounded-2xl dark:bg-zinc-900">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold">Templates</h2>
+          <p class="text-xs text-zinc-400">Start with a reusable project setup.</p>
+        </div>
+        <button type="button" aria-label="Close" onclick={() => (templatesOpen = false)} class="p-1 text-zinc-400 hover:text-zinc-600">
+          <X size={18} />
+        </button>
+      </div>
+      <label class="mt-4 block">
+        <span class="text-xs font-semibold tracking-wide text-zinc-400 uppercase">New project name</span>
+        <input
+          bind:value={templateProjectName}
+          placeholder="Defaults to the template name"
+          class="mt-1 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-zinc-700"
+        />
+      </label>
+      <div class="mt-4 space-y-2">
+        {#each data.templates as template}
+          <div class="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="font-medium">{template.name}</div>
+                <div class="text-xs text-zinc-400">{template.description}</div>
+                <div class="mt-2 text-xs text-zinc-500">{template.task_count} tasks</div>
+              </div>
+              <button
+                type="button"
+                onclick={() => useTemplate(template)}
+                disabled={importingTemplateId === template.id}
+                class="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {importingTemplateId === template.id ? 'Importing…' : 'Use'}
+              </button>
+            </div>
+            {#if template.tasks?.length}
+              <div class="mt-2 flex flex-wrap gap-1">
+                {#each template.tasks.slice(0, 5) as task}
+                  <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{task.name}</span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </div>
+  </div>
 {/if}
 
 {#if bulkShareOpen}

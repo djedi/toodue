@@ -99,6 +99,15 @@ async fn main() {
         .route("/projects/share-bulk", post(routes::projects::share_bulk))
         .route("/projects/{id}/share", post(routes::projects::share))
         .route(
+            "/templates",
+            get(routes::templates::list).post(routes::templates::create),
+        )
+        .route(
+            "/templates/{id}/import",
+            post(routes::templates::import_template),
+        )
+        .route("/templates/{id}", delete(routes::templates::remove))
+        .route(
             "/projects/{id}/members/{user_id}",
             delete(routes::projects::remove_member),
         )
