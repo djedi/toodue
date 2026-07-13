@@ -474,16 +474,44 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(b): Json<UpdateTask>,
 ) -> ApiResult<Json<Task>> {
-    let task = fetch_task(&st.db.pool, id).await?;
-    require_member(&st.db.pool, user.id, task.project_id).await?;
+    let authorized_task = fetch_task(&st.db.pool, id).await?;
+    require_member(&st.db.pool, user.id, authorized_task.project_id).await?;
 
-    let mut moved_from: Option<i64> = None;
     if let Some(new_pid) = b.project_id {
-        if new_pid != task.project_id {
+        if new_pid != authorized_task.project_id {
             require_member(&st.db.pool, user.id, new_pid).await?;
-            moved_from = Some(task.project_id);
         }
     }
+
+    // Serialize updates to this task before deriving any new state. In
+    // particular, a concurrent reopen must not race a completion that creates
+    // successor and leave both the source and successor active.
+    let mut tx = st.db.pool.begin().await?;
+    if st.db.kind == crate::db::DbKind::Sqlite {
+        // SQLite has no SELECT ... FOR UPDATE. Acquire its single writer slot
+        // before reading so a competing update waits, then observes our
+        // committed state instead of failing a deferred-transaction upgrade.
+        sqlx::query("UPDATE tasks SET updated_at = updated_at WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let lock_suffix = if st.db.kind == crate::db::DbKind::Postgres {
+        " FOR UPDATE"
+    } else {
+        ""
+    };
+    let sql = format!("SELECT {TASK_COLS} FROM tasks t WHERE t.id = ?{lock_suffix}");
+    let task = sqlx::query_as::<_, Task>(&*crate::db::sql(&sql))
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    require_member(&st.db.pool, user.id, task.project_id).await?;
+    let moved_from = b
+        .project_id
+        .filter(|new_pid| *new_pid != task.project_id)
+        .map(|_| task.project_id);
 
     let now = now_iso();
     let mut new_name = task.name.clone();
@@ -576,8 +604,7 @@ pub async fn update(
         new_project_id = pid;
     }
 
-    let mut tx = st.db.pool.begin().await?;
-    if b.completed == Some(false) && task.completed_at.is_some() {
+    if b.completed == Some(false) {
         let successor: Option<(i64,)> = sqlx::query_as(&*crate::db::sql(
             "SELECT id FROM tasks WHERE repeat_source_id = ? LIMIT 1",
         ))

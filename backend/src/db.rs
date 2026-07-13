@@ -79,6 +79,9 @@ pub async fn connect(data_dir: &Path) -> Result<Database, sqlx::Error> {
             Box::pin(async move {
                 if kind == DbKind::Sqlite {
                     sqlx::query("PRAGMA foreign_keys = ON")
+                        .execute(&mut *connection)
+                        .await?;
+                    sqlx::query("PRAGMA busy_timeout = 5000")
                         .execute(connection)
                         .await?;
                 }

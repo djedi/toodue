@@ -370,8 +370,10 @@ pub async fn share(
         ApiError::bad_request("no TooDue account with that email — ask them to sign up first")
     })?;
 
-    sqlx::query(&*crate::db::sql(
+    sqlx::query(st.db.sql(
         "INSERT OR IGNORE INTO project_members (project_id, user_id, role) VALUES (?, ?, 'member')",
+        "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'member') \
+         ON CONFLICT (project_id, user_id) DO NOTHING",
     ))
     .bind(id)
     .bind(target_id)

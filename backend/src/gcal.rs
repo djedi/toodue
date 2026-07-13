@@ -417,8 +417,10 @@ async fn upsert_event(st: &AppState, user_id: i64, task: &Task) -> GRes<()> {
     }
     let v: Value = resp.json().await.map_err(estr)?;
     let event_id = v["id"].as_str().ok_or("event insert returned no id")?;
-    sqlx::query(&*crate::db::sql(
+    sqlx::query(st.db.sql(
         "INSERT OR REPLACE INTO gcal_events (user_id, task_id, event_id) VALUES (?, ?, ?)",
+        "INSERT INTO gcal_events (user_id, task_id, event_id) VALUES ($1, $2, $3) \
+         ON CONFLICT (user_id, task_id) DO UPDATE SET event_id = EXCLUDED.event_id",
     ))
     .bind(user_id)
     .bind(task.id)
@@ -475,17 +477,19 @@ async fn task_sync(st: &AppState, task_id: i64) -> GRes<()> {
         .map_err(estr)?;
 
     let desired_users: Vec<i64> = match &task {
-        Some(t) if t.due_date.is_some() && t.completed_at.is_none() => sqlx::query_as::<_, (i64,)>(
-            "SELECT ga.user_id FROM google_accounts ga \
+        Some(t) if t.due_date.is_some() && t.completed_at.is_none() => {
+            sqlx::query_as::<_, (i64,)>(&*crate::db::sql(
+                "SELECT ga.user_id FROM google_accounts ga \
                  JOIN project_members m ON m.user_id = ga.user_id WHERE m.project_id = ?",
-        )
-        .bind(t.project_id)
-        .fetch_all(&st.db.pool)
-        .await
-        .map_err(estr)?
-        .into_iter()
-        .map(|r| r.0)
-        .collect(),
+            ))
+            .bind(t.project_id)
+            .fetch_all(&st.db.pool)
+            .await
+            .map_err(estr)?
+            .into_iter()
+            .map(|r| r.0)
+            .collect()
+        }
         _ => Vec::new(),
     };
 
