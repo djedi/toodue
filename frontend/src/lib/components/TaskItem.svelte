@@ -1,6 +1,7 @@
 <script>
   import { ui, completeTask, projectById } from '../state.svelte.js';
   import { dayLabel, fmtTime, isOverdue, todayStr } from '../dates.js';
+  import { repeatLabel } from '../recurrence.js';
   import {
     Check,
     CalendarDays,
@@ -8,6 +9,7 @@
     MessageSquare,
     Paperclip,
     GitBranch,
+    Repeat2,
     Hash
   } from '@lucide/svelte';
 
@@ -71,12 +73,18 @@
       {#if task.description}
         <div class="mt-0.5 truncate text-xs text-zinc-400">{task.description}</div>
       {/if}
-      {#if task.due_date || task.deadline || task.comment_count || task.attachment_count || task.subtask_count || (showProject && project)}
+      {#if task.due_date || task.repeat_rule || task.deadline || task.comment_count || task.attachment_count || task.subtask_count || (showProject && project)}
         <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
           {#if task.due_date}
             <span class="flex items-center gap-1 {dateColor}">
               <CalendarDays size={12} />
               {dayLabel(task.due_date)}{task.due_time ? ` ${fmtTime(task.due_time)}` : ''}
+            </span>
+          {/if}
+          {#if task.repeat_rule}
+            <span class="flex items-center gap-1 text-brand-600 dark:text-brand-400" title={repeatLabel(task.repeat_rule)}>
+              <Repeat2 size={12} />
+              {repeatLabel(task.repeat_rule)}
             </span>
           {/if}
           {#if task.deadline}

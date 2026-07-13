@@ -6,8 +6,11 @@ real-time sync over SSE.
 ## Features
 
 - **Inbox / Today / Upcoming / Projects** — the four tabs you expect, responsive from phone to desktop
-- **Full task model** — name, description, date + time, deadline, priority (P1–P4), project,
-  sub-tasks, comments, and file attachments
+- **Full task model** — name, description, date + time, repeating schedules, deadline,
+  priority (P1–P4), project, sub-tasks, comments, and file attachments
+- **Repeating tasks** — daily, weekly, monthly, or yearly schedules create the next occurrence
+  when completed; overdue schedules advance to the next future date and recurring parent tasks
+  carry their sub-tasks forward
 - **Nested projects** and project sharing: invite another TooDue user by email and stay in sync
 - **Real-time** — server-sent events push every change to all members instantly
 - **PWA** — installable on iOS/Android/desktop, light/dark/system theme
@@ -101,4 +104,4 @@ The URL contains a private token. If it leaks, rotate it with `POST /api/me/cale
 
 - SaaS offering with fair, affordable subscriptions
 - Native iOS/Android apps
-- Labels, filters, reminders, recurring tasks
+- Labels, filters, and reminders

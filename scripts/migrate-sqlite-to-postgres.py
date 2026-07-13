@@ -22,7 +22,7 @@ TABLES: list[tuple[str, list[str]]] = [
     ("projects", ["id", "name", "color", "parent_id", "owner_id", "is_inbox", "sort_order", "created_at"]),
     ("project_members", ["project_id", "user_id", "role"]),
     ("api_keys", ["id", "user_id", "name", "prefix", "token_hash", "last_used_at", "created_at"]),
-    ("tasks", ["id", "project_id", "parent_id", "creator_id", "name", "description", "due_date", "due_time", "deadline", "priority", "completed_at", "sort_order", "created_at", "updated_at"]),
+    ("tasks", ["id", "project_id", "parent_id", "creator_id", "name", "description", "due_date", "due_time", "deadline", "repeat_rule", "repeat_anchor", "repeat_source_id", "priority", "completed_at", "sort_order", "created_at", "updated_at"]),
     ("comments", ["id", "task_id", "user_id", "body", "created_at"]),
     ("attachments", ["id", "task_id", "user_id", "filename", "stored_name", "mime", "size", "created_at"]),
     ("google_accounts", ["user_id", "access_token", "refresh_token", "token_expires_at", "calendar_id", "time_zone", "channel_id", "resource_id", "channel_expires_at", "sync_token", "created_at"]),
@@ -52,6 +52,10 @@ def table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return row is not None
 
 
+def table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({q_ident(table)})")}
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: migrate-sqlite-to-postgres.py /path/to/toodue.db", file=sys.stderr)
@@ -79,8 +83,12 @@ def main() -> int:
     for table, columns in TABLES:
         if not table_exists(conn, table):
             continue
+        available = table_columns(conn, table)
         col_sql = ", ".join(q_ident(c) for c in columns)
-        select_sql = f"SELECT {', '.join(q_ident(c) for c in columns)} FROM {q_ident(table)}"
+        select_columns = [
+            q_ident(c) if c in available else f"NULL AS {q_ident(c)}" for c in columns
+        ]
+        select_sql = f"SELECT {', '.join(select_columns)} FROM {q_ident(table)}"
         for row in conn.execute(select_sql):
             values = ", ".join(q_value(row[c]) for c in columns)
             print(f"INSERT INTO {q_ident(table)} ({col_sql}) VALUES ({values});")

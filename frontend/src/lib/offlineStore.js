@@ -70,6 +70,7 @@ export function createOfflineTask(fields, { userId, now = new Date().toISOString
     due_date: fields.due_date ?? null,
     due_time: fields.due_time ?? null,
     deadline: fields.deadline ?? null,
+    repeat_rule: fields.repeat_rule ?? null,
     priority: fields.priority ?? 4,
     completed_at: null,
     sort_order: 0,
@@ -97,6 +98,7 @@ function taskCreateBody(task) {
     'due_date',
     'due_time',
     'deadline',
+    'repeat_rule',
     'priority',
     'sort_order'
   ]) {

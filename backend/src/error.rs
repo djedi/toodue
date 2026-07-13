@@ -27,6 +27,10 @@ impl ApiError {
         Self(StatusCode::NOT_FOUND, "not found".into())
     }
 
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        Self(StatusCode::CONFLICT, msg.into())
+    }
+
     pub fn internal(msg: impl Into<String>) -> Self {
         Self(StatusCode::INTERNAL_SERVER_ERROR, msg.into())
     }

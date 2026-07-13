@@ -852,10 +852,11 @@ async fn apply_event(st: &AppState, user_id: i64, ev: &Value) -> GRes<()> {
 
     let now = now_iso();
     sqlx::query(&*crate::db::sql(
-        "UPDATE tasks SET due_date = ?, due_time = ?, updated_at = ? WHERE id = ?",
+        "UPDATE tasks SET due_date = ?, due_time = ?, repeat_anchor = CASE WHEN repeat_rule IS NOT NULL THEN ? ELSE repeat_anchor END, updated_at = ? WHERE id = ?",
     ))
     .bind(&new_date)
     .bind(&new_time)
+    .bind(&new_date)
     .bind(&now)
     .bind(task_id)
     .execute(&st.db.pool)

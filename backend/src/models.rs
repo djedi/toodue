@@ -42,6 +42,9 @@ pub struct Task {
     pub due_date: Option<String>,
     pub due_time: Option<String>,
     pub deadline: Option<String>,
+    pub repeat_rule: Option<String>,
+    #[serde(skip)]
+    pub repeat_anchor: Option<String>,
     pub priority: i64,
     pub completed_at: Option<String>,
     pub sort_order: i64,

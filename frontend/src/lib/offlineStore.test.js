@@ -27,9 +27,15 @@ test('snapshot persists user, projects, and tasks for offline boot', () => {
 test('queueTaskCreate creates a local task and replay posts it before refreshing', async () => {
   const storage = createMemoryStorage();
   const localTask = createOfflineTask(
-    { project_id: 1, name: 'Buy milk', due_date: '2026-07-03' },
+    {
+      project_id: 1,
+      name: 'Buy milk',
+      due_date: '2026-07-03',
+      repeat_rule: 'weekly'
+    },
     { userId: 7, now: '2026-07-03T12:00:00.000Z', tempId: -1 }
   );
+  assert.equal(localTask.repeat_rule, 'weekly');
 
   queueTaskCreate(localTask, storage);
 
@@ -49,7 +55,12 @@ test('queueTaskCreate creates a local task and replay posts it before refreshing
     {
       method: 'POST',
       path: '/tasks',
-      body: { project_id: 1, name: 'Buy milk', due_date: '2026-07-03' }
+      body: {
+        project_id: 1,
+        name: 'Buy milk',
+        due_date: '2026-07-03',
+        repeat_rule: 'weekly'
+      }
     },
     { method: 'REFRESH' }
   ]);

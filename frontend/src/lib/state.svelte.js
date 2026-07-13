@@ -1,4 +1,5 @@
 import { api, request, setUnauthorizedHandler, isOfflineError } from './api.js';
+import { todayStr } from './dates.js';
 import {
   clearOfflineState,
   createOfflineProject,
@@ -113,10 +114,13 @@ function applyLocalTaskPatch(task, fields) {
   const now = new Date().toISOString();
   const updated = { ...task, updated_at: now, _offline: true };
   if ('completed' in fields) updated.completed_at = fields.completed ? now : null;
-  for (const key of ['name', 'description', 'due_date', 'due_time', 'deadline', 'priority', 'project_id']) {
+  for (const key of ['name', 'description', 'due_date', 'due_time', 'deadline', 'repeat_rule', 'priority', 'project_id']) {
     if (key in fields) updated[key] = fields[key];
   }
-  if (fields.due_date === null) updated.due_time = null;
+  if (fields.due_date === null) {
+    updated.due_time = null;
+    updated.repeat_rule = null;
+  }
   return updated;
 }
 
@@ -351,10 +355,14 @@ export async function addTask(fields) {
 }
 
 export async function updateTask(id, fields) {
+  const existing = data.tasks.find((task) => task.id === id);
   try {
     const t = await api.patch(`/tasks/${id}`, fields);
     if (t.completed_at) data.tasks = data.tasks.filter((x) => x.id !== t.id);
     else upsert(data.tasks, t);
+    if (fields.completed === true && (existing?.repeat_rule || t.repeat_rule)) {
+      await refreshTasks();
+    }
     saveCurrentSnapshot();
     return t;
   } catch (err) {
@@ -373,7 +381,10 @@ export async function updateTask(id, fields) {
 
 export async function completeTask(task, completed) {
   try {
-    await updateTask(task.id, { completed });
+    await updateTask(task.id, {
+      completed,
+      ...(completed ? { completed_on: todayStr() } : {})
+    });
   } catch (e) {
     toast(e.message);
   }

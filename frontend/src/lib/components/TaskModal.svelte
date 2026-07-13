@@ -11,7 +11,8 @@
     projectById,
     toast
   } from '../state.svelte.js';
-  import { fmtTimestamp, fmtTime, dayLabel } from '../dates.js';
+  import { fmtTimestamp, fmtTime, dayLabel, todayStr } from '../dates.js';
+  import { repeatOptions } from '../recurrence.js';
   import DatePicker from './DatePicker.svelte';
   import {
     X,
@@ -22,6 +23,7 @@
     Plus,
     CalendarDays,
     Flag,
+    Repeat2,
     Download,
     Hash
   } from '@lucide/svelte';
@@ -101,7 +103,8 @@
   }
 
   async function toggleDone() {
-    await save({ completed: !task.completed_at });
+    const completed = !task.completed_at;
+    await save({ completed, ...(completed ? { completed_on: todayStr() } : {}) });
   }
 
   async function removeTask() {
@@ -242,7 +245,7 @@
         ></textarea>
 
         <!-- fields -->
-        <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div>
             <div class={fieldLabel}><CalendarDays size={11} class="mr-1 inline" />Date</div>
             <button
@@ -262,6 +265,19 @@
             >
               {task.deadline ? dayLabel(task.deadline) : 'None'}
             </button>
+          </div>
+          <div>
+            <div class={fieldLabel}><Repeat2 size={11} class="mr-1 inline" />Repeat</div>
+            <select
+              value={task.repeat_rule ?? ''}
+              disabled={!task.due_date || !!task.parent_id}
+              onchange={(e) => save({ repeat_rule: e.target.value || null })}
+              class="{fieldInput} mt-1 disabled:opacity-40"
+            >
+              {#each repeatOptions as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
           </div>
           <div>
             <div class={fieldLabel}>Priority</div>

@@ -442,6 +442,12 @@ components:
           - string
           - 'null'
           format: date
+        repeat_rule:
+          type:
+          - string
+          - 'null'
+          enum: [daily, weekly, monthly, yearly, null]
+          description: Requires `due_date` and is not allowed on subtasks.
         priority:
           type: integer
           minimum: 1
@@ -599,6 +605,11 @@ components:
           - string
           - 'null'
           format: date
+        repeat_rule:
+          type:
+          - string
+          - 'null'
+          enum: [daily, weekly, monthly, yearly, null]
         priority:
           type: integer
           minimum: 1
@@ -677,13 +688,23 @@ components:
           - 'null'
           format: date
           description: Send null to clear.
+        repeat_rule:
+          type:
+          - string
+          - 'null'
+          enum: [daily, weekly, monthly, yearly, null]
+          description: Send null to stop repeating. Requires a due date and is not allowed on subtasks.
         priority:
           type: integer
           minimum: 1
           maximum: 4
         completed:
           type: boolean
-          description: true completes the task; false reopens it.
+          description: "true completes the task and atomically creates the next occurrence when repeating. Reopening is rejected after a successor exists."
+        completed_on:
+          type: string
+          format: date
+          description: "Client-local completion date. Only valid with completed=true; prevents timezone-boundary skips."
         project_id:
           type: integer
           format: int64

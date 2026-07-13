@@ -1,14 +1,16 @@
 <script>
   import { data, ui, addTask, inboxProject, toast } from '../state.svelte.js';
   import { dayLabel, fmtTime } from '../dates.js';
+  import { normalizeRepeatRule, repeatOptions } from '../recurrence.js';
   import DatePicker from './DatePicker.svelte';
-  import { CalendarDays, Flag, X } from '@lucide/svelte';
+  import { CalendarDays, Flag, Repeat2, X } from '@lucide/svelte';
 
   let name = $state('');
   let description = $state('');
   let due_date = $state(ui.quickAdd?.due_date ?? '');
   let due_time = $state('');
   let deadline = $state('');
+  let repeat_rule = $state('');
   let priority = $state(4);
   let project_id = $state(
     ui.quickAdd?.project_id ??
@@ -41,6 +43,7 @@
         due_date: due_date || null,
         due_time: due_date && due_time ? due_time : null,
         deadline: deadline || null,
+        repeat_rule: normalizeRepeatRule(repeat_rule, due_date),
         priority: Number(priority)
       });
       close();
@@ -94,6 +97,18 @@
         <CalendarDays size={14} class="text-emerald-600" />
         {due_date ? `${dayLabel(due_date)}${due_time ? ` · ${fmtTime(due_time)}` : ''}` : 'Date'}
       </button>
+      <label class={chip} title="Repeat">
+        <Repeat2 size={14} class="text-brand-600" />
+        <select
+          bind:value={repeat_rule}
+          disabled={!due_date}
+          class="bg-transparent outline-none disabled:opacity-50"
+        >
+          {#each repeatOptions as option}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
       <button type="button" class={chip} title="Deadline" onclick={() => (pickerFor = 'deadline')}>
         <Flag size={14} class="text-amber-600" />
         {deadline ? dayLabel(deadline) : 'Deadline'}
