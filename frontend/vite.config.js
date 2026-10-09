@@ -30,8 +30,9 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // Never let the service worker intercept API calls or the SSE stream.
-        navigateFallbackDenylist: [/^\/api/]
+        // Never let the service worker intercept API calls, the SSE stream, or the
+        // server-rendered OAuth/MCP endpoints (the /connect consent page is SPA).
+        navigateFallbackDenylist: [/^\/api/, /^\/oauth\//, /^\/mcp/, /^\/\.well-known\//]
       }
     })
   ],
@@ -40,6 +41,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
+        target: process.env.VITE_API_PROXY || 'http://localhost:8080'
+      },
+      // MCP + OAuth endpoints so agents can connect to the dev server.
+      '^/(mcp|oauth/|\\.well-known/)': {
         target: process.env.VITE_API_PROXY || 'http://localhost:8080'
       }
     }

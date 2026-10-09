@@ -9,6 +9,8 @@ info:
     The web app and external integrations call the same resource endpoints. Browser sessions authenticate with the `toodue_session` cookie; external integrations should authenticate with `Authorization: Bearer tdue_...` API keys created in the TooDue app.
 
     The legacy `/api/ai/*` aliases remain for compatibility, but new clients should use the canonical endpoints documented here.
+
+    Building with an AI agent? TooDue also serves a remote MCP server at `https://app.toodue.com/mcp` with browser OAuth sign-in. See the [MCP setup guide](https://docs.toodue.com/mcp.html).
   contact:
     name: TooDue
     url: https://toodue.com

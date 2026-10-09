@@ -16,6 +16,8 @@ real-time sync over SSE.
 - **PWA** — installable on iOS/Android/desktop, light/dark/system theme
 - **Calendar integration** — a per-user iCal feed URL you can subscribe to from Google Calendar
   or Fantastical (tasks with dates appear as events, deadlines as separate all-day events)
+- **AI agents (MCP)** — a remote MCP server at `/mcp` with browser OAuth: point Claude, ChatGPT,
+  Cursor, or any MCP client at it, approve access, and let your agent manage your to-dos
 - **Small and fast** — a single Rust binary with an embedded SQLite database serves the API and
   the static frontend
 
@@ -69,6 +71,7 @@ disable response buffering for `/api/events` if your proxy buffers by default).
 | `DATA_DIR`   | `./data`      | SQLite DB + attachment storage |
 | `STATIC_DIR` | `./static`    | Built frontend to serve        |
 | `RUST_LOG`   | `toodue=info` | Log filter                     |
+| `PUBLIC_URL` | (from request)| Public origin, used for OAuth/MCP metadata and Google sync |
 
 ## Calendar integration
 
@@ -91,13 +94,25 @@ Settings (the gear icon) → **Calendar feed** copies your personal iCal URL. Su
 
 The URL contains a private token. If it leaks, rotate it with `POST /api/me/calendar`.
 
+## AI agents (MCP)
+
+TooDue serves a remote [MCP](https://modelcontextprotocol.io) server at `<your origin>/mcp`.
+Add that URL to your agent as a remote MCP server. The agent opens TooDue in your browser,
+you choose what it may do (view / create & update / delete), and it's connected. Manage and
+disconnect agents in Settings → **AI agents**. Set `PUBLIC_URL` in production so OAuth
+metadata advertises the right origin behind your proxy.
+
+Setup for each client: [`docs/mcp.html`](docs/mcp.html). Technical reference:
+[`docs/api-mcp.md`](docs/api-mcp.md).
+
 ## Architecture
 
 - `backend/` — Rust (axum + sqlx/SQLite). REST API under `/api`, SSE stream at `/api/events`,
   iCal feed at `/api/calendar/<token>.ics`. Serves the built frontend in production.
 - `frontend/` — Svelte 5 + Vite + Tailwind 4, Lucide icons, `vite-plugin-pwa`.
   A hash-routed SPA; state lives in `src/lib/state.svelte.js`.
-- Auth is cookie-based sessions with argon2 password hashing.
+- Auth is cookie-based sessions with argon2 password hashing. API keys and OAuth (for MCP
+  clients, `backend/src/oauth.rs`) use bearer tokens; the MCP server is `backend/src/mcp.rs`.
 - Sharing: every project has members; all mutations broadcast to project members over SSE.
 
 ## Roadmap

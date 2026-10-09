@@ -122,3 +122,52 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_task ON attachments(task_id);
+
+CREATE TABLE IF NOT EXISTS oauth_clients (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  client_uri    TEXT,
+  redirect_uris TEXT NOT NULL,
+  created_at    TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+);
+
+CREATE TABLE IF NOT EXISTS oauth_requests (
+  id             TEXT PRIMARY KEY,
+  client_id      TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+  redirect_uri   TEXT NOT NULL,
+  scope          TEXT NOT NULL,
+  state          TEXT,
+  code_challenge TEXT NOT NULL,
+  resource       TEXT,
+  expires_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_grants (
+  id           BIGSERIAL PRIMARY KEY,
+  user_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  client_id    TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+  scope        TEXT NOT NULL,
+  last_used_at TEXT,
+  created_at   TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+  UNIQUE (user_id, client_id)
+);
+
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  code_hash      TEXT PRIMARY KEY,
+  grant_id       BIGINT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+  redirect_uri   TEXT NOT NULL,
+  code_challenge TEXT NOT NULL,
+  scope          TEXT NOT NULL,
+  expires_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+  token_hash TEXT PRIMARY KEY,
+  grant_id   BIGINT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL,
+  scope      TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_grants_user ON oauth_grants(user_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_grant ON oauth_tokens(grant_id);

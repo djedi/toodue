@@ -27,9 +27,12 @@ TABLES: list[tuple[str, list[str]]] = [
     ("attachments", ["id", "task_id", "user_id", "filename", "stored_name", "mime", "size", "created_at"]),
     ("google_accounts", ["user_id", "access_token", "refresh_token", "token_expires_at", "calendar_id", "time_zone", "channel_id", "resource_id", "channel_expires_at", "sync_token", "created_at"]),
     ("gcal_events", ["user_id", "task_id", "event_id"]),
+    ("oauth_clients", ["id", "name", "client_uri", "redirect_uris", "created_at"]),
+    ("oauth_grants", ["id", "user_id", "client_id", "scope", "last_used_at", "created_at"]),
+    ("oauth_tokens", ["token_hash", "grant_id", "kind", "scope", "expires_at"]),
 ]
 
-SEQUENCE_TABLES = ["users", "projects", "api_keys", "tasks", "comments", "attachments"]
+SEQUENCE_TABLES = ["users", "projects", "api_keys", "tasks", "comments", "attachments", "oauth_grants"]
 
 
 def q_ident(name: str) -> str:
@@ -76,8 +79,8 @@ def main() -> int:
     # connection (the bootstrap user of the official postgres image is one).
     print("SET session_replication_role = replica;")
     print(
-        "TRUNCATE TABLE gcal_events, google_accounts, attachments, comments, tasks, "
-        "api_keys, project_members, projects, sessions, users RESTART IDENTITY CASCADE;"
+        "TRUNCATE TABLE oauth_tokens, oauth_codes, oauth_grants, oauth_requests, oauth_clients, "
+        "gcal_events, google_accounts, attachments, comments, tasks, api_keys, project_members, projects, sessions, users RESTART IDENTITY CASCADE;"
     )
 
     for table, columns in TABLES:
