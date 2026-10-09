@@ -28,7 +28,7 @@ pub fn hash_token(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::AUTHORIZATION)?
         .to_str()
@@ -62,7 +62,10 @@ pub struct AuthUser(pub User);
 #[derive(Clone)]
 pub struct ApiUser(pub User);
 
-async fn user_from_bearer(st: &AppState, headers: &HeaderMap) -> ApiResult<Option<User>> {
+pub(crate) async fn user_from_bearer(
+    st: &AppState,
+    headers: &HeaderMap,
+) -> ApiResult<Option<User>> {
     let Some(token) = bearer_token(headers) else {
         return Ok(None);
     };

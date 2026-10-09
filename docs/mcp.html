@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TooDue MCP Server</title>
+    <meta name="description" content="Connect Claude, ChatGPT, Cursor, VS Code, and other AI agents to your TooDue tasks with the TooDue MCP server." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111827'/%3E%3Cpath d='M18 33l9 9 20-23' fill='none' stroke='%236ee7b7' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #18181b;
+        --muted: #52525b;
+        --line: #e4e4e7;
+        --code-bg: #f4f4f5;
+        --accent: #0284c7;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f172a;
+          --fg: #e2e8f0;
+          --muted: #94a3b8;
+          --line: #1e293b;
+          --code-bg: #111c33;
+          --accent: #7dd3fc;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main { max-width: 760px; margin: 0 auto; padding: 3rem 16px 5rem; }
+      header nav { display: flex; gap: 1rem; font-size: 0.9rem; margin-bottom: 2rem; }
+      a { color: var(--accent); }
+      h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 0.5rem; }
+      h2 { font-size: 1.35rem; margin: 2.5rem 0 0.75rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+      h3 { font-size: 1.05rem; margin: 1.75rem 0 0.5rem; }
+      p, li { color: var(--fg); }
+      .lead { color: var(--muted); font-size: 1.1rem; margin-top: 0; }
+      code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
+      pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 0.9rem 1rem; overflow-x: auto; }
+      pre code { background: none; padding: 0; font-size: 0.85rem; }
+      .url { display: block; font-size: 1.05rem; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); word-break: break-all; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.92rem; display: block; overflow-x: auto; }
+      th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; }
+      ol li, ul li { margin: 0.3rem 0; }
+      .note { border-left: 3px solid var(--accent); padding: 0.25rem 0 0.25rem 1rem; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <nav><a href="https://app.toodue.com">TooDue app</a><a href="/">REST API reference</a></nav>
+        <h1>Connect AI agents to TooDue</h1>
+        <p class="lead">
+          The TooDue MCP server lets Claude, ChatGPT, Cursor, VS Code, and any other
+          <a href="https://modelcontextprotocol.io">Model Context Protocol</a> client read and manage your
+          to-do list. You sign in through your browser and choose exactly what the agent may do. No API keys to copy.
+        </p>
+      </header>
+
+      <h2 id="url">Server URL</h2>
+      <code class="url">https://app.toodue.com/mcp</code>
+      <p>
+        Self-hosting? Use <code>https://&lt;your-domain&gt;/mcp</code>. The exact URL is shown in the app under
+        <strong>Settings → AI agents</strong>.
+      </p>
+
+      <h2 id="how">How connecting works</h2>
+      <ol>
+        <li>Add the server URL to your agent as a <em>remote</em> (HTTP) MCP server.</li>
+        <li>Your agent opens a TooDue page in your browser. Log in if you aren't already.</li>
+        <li>Review the request and choose permissions: view (always), create &amp; update, and delete.</li>
+        <li>Click <strong>Allow access</strong>. The browser hands you back to the agent, which is now connected.</li>
+      </ol>
+      <p>
+        The agent gets a short-lived access token that refreshes automatically. It never sees your password. You can
+        see every connected agent, and disconnect any of them instantly, under <strong>Settings → AI agents</strong>.
+      </p>
+
+      <h2 id="clients">Setup by client</h2>
+
+      <h3>Claude (claude.ai and Claude Desktop)</h3>
+      <ol>
+        <li>Open <strong>Settings → Connectors</strong> and choose <strong>Add custom connector</strong>.</li>
+        <li>Name it <code>TooDue</code> and paste <code>https://app.toodue.com/mcp</code>.</li>
+        <li>Click <strong>Connect</strong> and approve access in the browser window that opens.</li>
+      </ol>
+
+      <h3>Claude Code</h3>
+<pre><code>claude mcp add --transport http toodue https://app.toodue.com/mcp</code></pre>
+      <p>Then run <code>/mcp</code> inside Claude Code, select <code>toodue</code>, and choose <strong>Authenticate</strong>.</p>
+
+      <h3>ChatGPT</h3>
+      <ol>
+        <li>Open <strong>Settings → Apps &amp; Connectors</strong> (turn on developer mode under Advanced if needed).</li>
+        <li>Create a connector with the URL <code>https://app.toodue.com/mcp</code> and authentication set to <strong>OAuth</strong>.</li>
+        <li>Approve access when TooDue opens.</li>
+      </ol>
+
+      <h3>Cursor</h3>
+      <p>Add to <code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code> in a project), then click <strong>Connect</strong> next to TooDue in Cursor's MCP settings:</p>
+<pre><code>{
+  "mcpServers": {
+    "toodue": { "url": "https://app.toodue.com/mcp" }
+  }
+}</code></pre>
+
+      <h3>VS Code (GitHub Copilot)</h3>
+      <p>Add to <code>.vscode/mcp.json</code> or your user MCP configuration, then start the server and sign in when prompted:</p>
+<pre><code>{
+  "servers": {
+    "toodue": { "type": "http", "url": "https://app.toodue.com/mcp" }
+  }
+}</code></pre>
+
+      <h3>OpenAI Codex CLI</h3>
+      <p>Add to <code>~/.codex/config.toml</code>:</p>
+<pre><code>[mcp_servers.toodue]
+url = "https://app.toodue.com/mcp"</code></pre>
+      <p>Then run <code>codex mcp login toodue</code>.</p>
+
+      <h3>Clients that only support local (stdio) servers</h3>
+      <p>Bridge with <a href="https://www.npmjs.com/package/mcp-remote"><code>mcp-remote</code></a>. It handles the browser sign-in for you:</p>
+<pre><code>{
+  "mcpServers": {
+    "toodue": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://app.toodue.com/mcp"]
+    }
+  }
+}</code></pre>
+
+      <h2 id="permissions">Permissions</h2>
+      <table>
+        <thead><tr><th>Permission</th><th>Scope</th><th>Allows</th></tr></thead>
+        <tbody>
+          <tr><td>View your projects and tasks</td><td><code>read</code></td><td>Always granted. Projects, tasks, sub-tasks, comments, due dates.</td></tr>
+          <tr><td>Create and update tasks</td><td><code>write</code></td><td>Add, edit, reschedule, complete, and comment on tasks; create projects.</td></tr>
+          <tr><td>Delete tasks</td><td><code>delete</code></td><td>Permanently remove tasks and their sub-tasks.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        Agents only see the tools their permissions allow. To change permissions, connect again from the agent and
+        approve a different set. The new set replaces the old one.
+      </p>
+
+      <h2 id="tools">Tools</h2>
+      <table>
+        <thead><tr><th>Tool</th><th>Scope</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>toodue_agenda</code></td><td>read</td><td>Overdue tasks plus tasks due in the next N days (default 7). Pass <code>today</code> as your local date.</td></tr>
+          <tr><td><code>toodue_list_projects</code></td><td>read</td><td>All your projects (including shared ones) with ids and active task counts.</td></tr>
+          <tr><td><code>toodue_get_project</code></td><td>read</td><td>One project with its members.</td></tr>
+          <tr><td><code>toodue_list_tasks</code></td><td>read</td><td>Incomplete tasks, optionally for one project; or recently completed tasks in a project.</td></tr>
+          <tr><td><code>toodue_search_tasks</code></td><td>read</td><td>Find incomplete tasks by name or description.</td></tr>
+          <tr><td><code>toodue_get_task</code></td><td>read</td><td>A task with sub-tasks, comments, and attachments.</td></tr>
+          <tr><td><code>toodue_me</code></td><td>read</td><td>The account the agent is acting as.</td></tr>
+          <tr><td><code>toodue_create_task</code></td><td>write</td><td>Create a task or sub-task. Goes to your Inbox unless a project is given.</td></tr>
+          <tr><td><code>toodue_update_task</code></td><td>write</td><td>Rename, reschedule, re-prioritize, move, or set a repeat rule.</td></tr>
+          <tr><td><code>toodue_complete_task</code></td><td>write</td><td>Complete or reopen a task. Completing a repeating task schedules the next one.</td></tr>
+          <tr><td><code>toodue_add_comment</code></td><td>write</td><td>Comment on a task.</td></tr>
+          <tr><td><code>toodue_create_project</code></td><td>write</td><td>Create a project, optionally nested.</td></tr>
+          <tr><td><code>toodue_delete_task</code></td><td>delete</td><td>Permanently delete a task.</td></tr>
+        </tbody>
+      </table>
+      <p>Dates are <code>YYYY-MM-DD</code>, times are 24-hour <code>HH:MM</code>, and priority runs from <code>1</code> (P1, most urgent) to <code>4</code> (P4, default). Changes made by agents appear instantly in every open TooDue app and sync to Google Calendar like any other edit.</p>
+
+      <h3>Things to ask your agent</h3>
+      <ul>
+        <li>“What's on my plate today? Anything overdue?”</li>
+        <li>“Turn these meeting notes into tasks in my Work project, due next week.”</li>
+        <li>“Move everything overdue to tomorrow and bump the invoice task to P1.”</li>
+        <li>“Plan my week: spread my unscheduled Home tasks across the next five days.”</li>
+      </ul>
+
+      <h2 id="api-keys">Using an API key instead</h2>
+      <p>
+        For scripts, CI, or agents that can't do browser sign-in, create a key in <strong>Settings → API keys</strong> and send it as a
+        bearer token to the same endpoint. API keys have full access to your account.
+      </p>
+<pre><code>{
+  "mcpServers": {
+    "toodue": {
+      "url": "https://app.toodue.com/mcp",
+      "headers": { "Authorization": "Bearer tdue_your_key_here" }
+    }
+  }
+}</code></pre>
+
+      <h2 id="security">Security</h2>
+      <ul>
+        <li>Only approve a connection you just started yourself. The consent page shows the agent's name and where you'll be sent afterward.</li>
+        <li>Agents act as you, including in projects others have shared with you.</li>
+        <li>Disconnecting an agent in Settings revokes all of its tokens immediately.</li>
+        <li>Access tokens last one hour. Refresh tokens rotate on every use and expire after 90 days of inactivity.</li>
+      </ul>
+
+      <h2 id="developers">For MCP client developers</h2>
+      <p>
+        TooDue implements the <a href="https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization">MCP authorization spec</a>
+        over the Streamable HTTP transport (stateless, JSON responses; <code>GET /mcp</code> returns 405).
+      </p>
+      <table>
+        <thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>POST /mcp</code></td><td>JSON-RPC endpoint. Protocol versions 2024-11-05 through 2025-11-25.</td></tr>
+          <tr><td><code>/.well-known/oauth-protected-resource/mcp</code></td><td>Protected resource metadata (RFC 9728), also linked from the <code>WWW-Authenticate</code> header on 401.</td></tr>
+          <tr><td><code>/.well-known/oauth-authorization-server</code></td><td>Authorization server metadata (RFC 8414).</td></tr>
+          <tr><td><code>POST /oauth/register</code></td><td>Dynamic client registration (RFC 7591). Public clients only.</td></tr>
+          <tr><td><code>GET /oauth/authorize</code></td><td>Authorization code flow. PKCE with <code>S256</code> is required. URL-based client IDs (client ID metadata documents) are supported.</td></tr>
+          <tr><td><code>POST /oauth/token</code></td><td><code>authorization_code</code> and <code>refresh_token</code> grants (form-encoded).</td></tr>
+          <tr><td><code>POST /oauth/revoke</code></td><td>Token revocation (RFC 7009).</td></tr>
+        </tbody>
+      </table>
+      <p class="note">
+        Redirect URIs must be <code>https</code>, <code>http</code> on a loopback address (any port), or a private-use app scheme
+        such as <code>cursor://</code>. OAuth access tokens work only at <code>/mcp</code>; use API keys for the
+        <a href="/">REST API</a>.
+      </p>
+    </main>
+  </body>
+</html>

@@ -1,11 +1,14 @@
 <script>
   import { api } from '../api.js';
   import { apiKeyCreatedMessage, maskApiKey } from '../apiKeys.js';
+  import { summarizeScope } from '../oauth.js';
   import { data, ui, refresh, signOut, toast } from '../state.svelte.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import ColorSchemePicker from './ColorSchemePicker.svelte';
   import {
     X,
+    BookOpen,
+    Bot,
     CalendarPlus,
     CalendarSync,
     Copy,
@@ -13,7 +16,8 @@
     ChevronRight,
     KeyRound,
     LogOut,
-    Trash2
+    Trash2,
+    Unplug
   } from '@lucide/svelte';
 
   let importInput = $state(null);
@@ -23,11 +27,33 @@
   let apiKeyName = $state('');
   let newApiKey = $state(null);
   let apiKeyBusy = $state(false);
+  let mcpUrl = $state('');
+  let connections = $state([]);
 
   $effect(() => {
     api.get('/google/status').then((g) => (google = g)).catch(() => {});
     api.get('/api-keys').then((keys) => (apiKeys = keys)).catch(() => {});
+    api.get('/mcp/info').then((r) => (mcpUrl = r.mcp_url)).catch(() => {});
+    api.get('/oauth/connections').then((c) => (connections = c)).catch(() => {});
   });
+
+  async function copyMcpUrl() {
+    if (!mcpUrl) return;
+    await navigator.clipboard.writeText(mcpUrl).catch(() => {});
+    toast('MCP server URL copied. Add it to your agent as a remote MCP server');
+  }
+
+  async function disconnectAgent(c) {
+    if (!confirm(`Disconnect ${c.client_name}? It will lose access to your TooDue account immediately.`))
+      return;
+    try {
+      await api.del(`/oauth/connections/${c.id}`);
+      connections = connections.filter((x) => x.id !== c.id);
+      toast(`${c.client_name} disconnected`);
+    } catch (err) {
+      toast(err.message);
+    }
+  }
 
   async function createApiKey(e) {
     e.preventDefault();
@@ -131,7 +157,7 @@
   onclick={(e) => e.target === e.currentTarget && close()}
 >
   <div
-    class="w-full rounded-t-2xl bg-white p-5 shadow-xl sm:max-w-md sm:rounded-2xl dark:bg-zinc-900"
+    class="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:max-w-md sm:rounded-2xl dark:bg-zinc-900"
     style="padding-bottom: max(1.25rem, env(safe-area-inset-bottom))"
   >
     <div class="flex items-center justify-between">
@@ -232,10 +258,78 @@
 
       <div class="rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
         <div class="flex items-start gap-3">
+          <Bot size={18} class="mt-0.5 flex-none text-zinc-400" />
+          <div class="min-w-0 flex-1">
+            <span class="block text-sm font-medium">AI agents</span>
+            <span class="block text-xs text-zinc-400">
+              Connect Claude, ChatGPT, Cursor, or any MCP client to manage your tasks. Add this URL as a
+              remote MCP server and approve access in your browser.
+            </span>
+          </div>
+        </div>
+
+        <div class="mt-3 flex gap-2">
+          <input
+            readonly
+            value={mcpUrl}
+            aria-label="MCP server URL"
+            onfocus={(e) => e.currentTarget.select()}
+            class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-xs outline-none dark:border-zinc-700 dark:bg-zinc-800/60"
+          />
+          <button
+            type="button"
+            onclick={copyMcpUrl}
+            disabled={!mcpUrl}
+            class="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            <Copy size={14} /> Copy
+          </button>
+        </div>
+        <a
+          href="https://docs.toodue.com/mcp.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
+        >
+          <BookOpen size={13} /> Setup guide for Claude, ChatGPT, Cursor, VS Code & more
+        </a>
+
+        {#if connections.length}
+          <p class="mt-3 text-xs font-medium tracking-wide text-zinc-400 uppercase">Connected</p>
+          <ul class="mt-1 space-y-1">
+            {#each connections as c (c.id)}
+              <li class="flex items-center gap-2 rounded-lg py-1.5">
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-sm font-medium">{c.client_name}</div>
+                  <div class="truncate text-xs text-zinc-400">
+                    {summarizeScope(c.scope)} · connected {c.created_at.slice(0, 10)}{c.last_used_at
+                      ? ` · used ${c.last_used_at.slice(0, 10)}`
+                      : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Disconnect {c.client_name}"
+                  title="Disconnect"
+                  onclick={() => disconnectAgent(c)}
+                  class="p-1 text-zinc-400 hover:text-red-600"
+                >
+                  <Unplug size={15} />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="mt-3 text-xs text-zinc-400">No agents connected yet.</p>
+        {/if}
+      </div>
+
+      <div class="rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div class="flex items-start gap-3">
           <KeyRound size={18} class="mt-0.5 flex-none text-zinc-400" />
           <div class="min-w-0 flex-1">
             <span class="block text-sm font-medium">API keys</span>
-            <span class="block text-xs text-zinc-400">Use with AI agents, scripts, and the TooDue MCP server</span>
+            <span class="block text-xs text-zinc-400">For scripts, the REST API, and agents that can't sign in with OAuth</span>
           </div>
         </div>
 

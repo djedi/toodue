@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Legacy stdio wrapper. Prefer the remote MCP server at https://app.toodue.com/mcp
+// (browser OAuth); see docs/mcp.html.
 const API_URL = (process.env.TOODUE_API_URL || 'https://app.toodue.com').replace(/\/$/, '');
 const API_KEY = process.env.TOODUE_API_KEY;
 

@@ -13,12 +13,18 @@
   import ProjectsView from './lib/views/Projects.svelte';
   import ProjectView from './lib/views/Project.svelte';
   import BrandLogo from './lib/components/BrandLogo.svelte';
+  import Connect from './lib/components/Connect.svelte';
+  import { connectRequestId } from './lib/oauth.js';
   import { Plus, RefreshCw, Settings as SettingsIcon } from '@lucide/svelte';
   import { getPullRefreshState } from './lib/pullRefresh.js';
   import { getQuickAddDefaults } from './lib/quickAdd.js';
   import { todayStr } from './lib/dates.js';
 
   boot();
+
+  // OAuth consent for AI agents (/connect?request=…) replaces the app shell.
+  const onConnectPage = location.pathname === '/connect';
+  const connectId = connectRequestId(location);
 
   const PULL_REFRESH_THRESHOLD = 72;
 
@@ -103,7 +109,9 @@
     <BrandLogo size="md" class="text-2xl text-brand-600" />
   </div>
 {:else if data.user === null}
-  <Auth />
+  <Auth notice={onConnectPage ? 'Log in to connect your AI agent to TooDue.' : ''} />
+{:else if onConnectPage}
+  <Connect requestId={connectId} />
 {:else}
   <div class="flex h-dvh bg-white dark:bg-zinc-950">
     <Sidebar />

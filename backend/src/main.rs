@@ -4,7 +4,9 @@ mod error;
 mod events;
 mod gcal;
 mod ics;
+mod mcp;
 mod models;
+mod oauth;
 mod routes;
 
 use std::net::SocketAddr;
@@ -14,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};
 use axum::Router;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
@@ -59,6 +62,18 @@ async fn main() {
         });
     }
 
+    // Expire stale OAuth requests, codes, and tokens.
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                oauth::cleanup(&st).await;
+            }
+        });
+    }
+
     let api = Router::new()
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
@@ -70,6 +85,13 @@ async fn main() {
             get(routes::api_keys::list).post(routes::api_keys::create),
         )
         .route("/api-keys/{id}", delete(routes::api_keys::remove))
+        .route("/mcp/info", get(oauth::server_info))
+        .route("/oauth/connections", get(oauth::list_connections))
+        .route("/oauth/connections/{id}", delete(oauth::remove_connection))
+        .route(
+            "/oauth/requests/{id}",
+            get(oauth::request_info).post(oauth::decide),
+        )
         .route("/ai/me", get(routes::ai::me))
         .route(
             "/ai/projects",
@@ -149,8 +171,40 @@ async fn main() {
         PathBuf::from(std::env::var("STATIC_DIR").unwrap_or_else(|_| "./static".into()));
     let spa = ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html")));
 
+    // Endpoints MCP clients call directly. Browser-based clients (e.g. the MCP
+    // Inspector) need CORS; auth is bearer-only, so no credentials are allowed.
+    let mcp_routes = Router::new()
+        .route("/mcp", get(mcp::handle_get).post(mcp::handle_post))
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(oauth::protected_resource_metadata),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource/mcp",
+            get(oauth::protected_resource_metadata),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(oauth::authorization_server_metadata),
+        )
+        .route("/oauth/register", post(oauth::register))
+        .route("/oauth/token", post(oauth::token))
+        .route("/oauth/revoke", post(oauth::revoke))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any)
+                .expose_headers([
+                    axum::http::header::WWW_AUTHENTICATE,
+                    axum::http::HeaderName::from_static("mcp-session-id"),
+                ]),
+        );
+
     let app = Router::new()
         .nest("/api", api)
+        .merge(mcp_routes)
+        .route("/oauth/authorize", get(oauth::authorize))
         .fallback_service(spa)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

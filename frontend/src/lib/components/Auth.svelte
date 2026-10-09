@@ -3,6 +3,8 @@
   import { data, afterSignIn } from '../state.svelte.js';
   import BrandLogo from './BrandLogo.svelte';
 
+  let { notice = '' } = $props();
+
   let mode = $state('login');
   let name = $state('');
   let email = $state('');
@@ -32,6 +34,12 @@
     <div class="mb-8 flex justify-center">
       <BrandLogo size="lg" class="text-3xl" />
     </div>
+
+    {#if notice}
+      <p class="mb-4 rounded-xl bg-brand-50 px-4 py-3 text-center text-sm text-brand-900 dark:bg-brand-950/60 dark:text-brand-100">
+        {notice}
+      </p>
+    {/if}
 
     <div class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <h1 class="mb-4 text-lg font-semibold">
