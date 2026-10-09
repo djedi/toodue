@@ -233,18 +233,37 @@ pub async fn register(
     .await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "client_id": client_id,
-            "client_id_issued_at": Utc::now().timestamp(),
-            "client_name": name,
-            "client_uri": client_uri,
-            "redirect_uris": b.redirect_uris,
-            "grant_types": ["authorization_code", "refresh_token"],
-            "response_types": ["code"],
-            "token_endpoint_auth_method": "none",
-            "scope": SCOPES.join(" "),
-        })),
+        Json(registration_response(
+            &client_id,
+            &name,
+            client_uri.as_deref(),
+            &b.redirect_uris,
+        )),
     ))
+}
+
+/// RFC 7591 response. Absent metadata is omitted rather than sent as null;
+/// strict clients reject null values.
+fn registration_response(
+    client_id: &str,
+    name: &str,
+    client_uri: Option<&str>,
+    redirect_uris: &[String],
+) -> Value {
+    let mut body = json!({
+        "client_id": client_id,
+        "client_id_issued_at": Utc::now().timestamp(),
+        "client_name": name,
+        "redirect_uris": redirect_uris,
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "scope": SCOPES.join(" "),
+    });
+    if let Some(uri) = client_uri {
+        body["client_uri"] = json!(uri);
+    }
+    body
 }
 
 fn clean_name(name: Option<&str>) -> String {
@@ -905,6 +924,16 @@ mod tests {
             "https://example.com/cb",
             "https://example.com:8443/cb"
         ));
+    }
+
+    #[test]
+    fn registration_response_omits_missing_client_uri() {
+        let uris = vec!["https://a.example/cb".to_string()];
+        let body = registration_response("tdc_x", "Agent", None, &uris);
+        assert!(body.get("client_uri").is_none());
+        assert!(body.as_object().unwrap().values().all(|v| !v.is_null()));
+        let body = registration_response("tdc_x", "Agent", Some("https://a.example"), &uris);
+        assert_eq!(body["client_uri"], "https://a.example");
     }
 
     #[test]
