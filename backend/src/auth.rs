@@ -3,13 +3,15 @@ use argon2::password_hash::{PasswordHash, SaltString};
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use axum::extract::{FromRef, FromRequestParts, State};
 use axum::http::request::Parts;
-use axum::http::{header, HeaderMap, HeaderName};
+use axum::http::{header, HeaderMap, HeaderName, Method};
 use axum::response::AppendHeaders;
 use axum::Json;
 use chrono::{Duration, Utc};
 use rand::RngCore;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::error::{ApiError, ApiResult};
 use crate::models::User;
@@ -88,6 +90,94 @@ pub(crate) async fn user_from_bearer(
     Ok(Some(user))
 }
 
+/// Native (Capacitor) clients can't use the cookie cross-origin, so they send
+/// their session token as a bearer header. EventSource can't set headers, so
+/// the in-app SSE stream also accepts it as `?access_token=`.
+fn native_session_token(parts: &Parts) -> Option<String> {
+    if let Some(token) = bearer_token(&parts.headers) {
+        return Some(token);
+    }
+    if parts.method != Method::GET || !parts.uri.path().ends_with("/events") {
+        return None;
+    }
+    query_param(parts, "access_token")
+}
+
+fn query_param(parts: &Parts, name: &str) -> Option<String> {
+    parts.uri.query()?.split('&').find_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        (k == name && !v.is_empty() && v.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| v.to_string())
+    })
+}
+
+/// Short-lived, single-use tokens that let a native client open one API URL
+/// (an attachment download, the Google connect redirect) in the system
+/// browser without handing it the session token. token -> (user, expiry, path).
+pub type LinkTokens = Arc<Mutex<HashMap<String, (i64, i64, String)>>>;
+
+const LINK_TOKEN_SECS: i64 = 60;
+
+fn link_path_allowed(path: &str) -> bool {
+    path == "/google/connect"
+        || path
+            .strip_prefix("/attachments/")
+            .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+}
+
+#[derive(Deserialize)]
+pub struct LinkTokenBody {
+    pub path: String,
+}
+
+pub async fn link_token(
+    State(st): State<AppState>,
+    AuthUser(user): AuthUser,
+    Json(b): Json<LinkTokenBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if !link_path_allowed(&b.path) {
+        return Err(ApiError::bad_request("unsupported link path"));
+    }
+    let token = random_token();
+    let now = Utc::now().timestamp();
+    let mut tokens = st.link_tokens.lock().unwrap();
+    tokens.retain(|_, (_, exp, _)| *exp > now);
+    tokens.insert(token.clone(), (user.id, now + LINK_TOKEN_SECS, b.path));
+    Ok(Json(serde_json::json!({ "token": token })))
+}
+
+fn take_link_token(st: &AppState, parts: &Parts) -> Option<i64> {
+    if parts.method != Method::GET {
+        return None;
+    }
+    let token = query_param(parts, "link_token")?;
+    let (user_id, exp, path) = st.link_tokens.lock().unwrap().remove(&token)?;
+    // Nested routers see the path without the /api prefix.
+    let req_path = parts.uri.path();
+    let req_path = req_path.strip_prefix("/api").unwrap_or(req_path);
+    (exp > Utc::now().timestamp() && req_path == path).then_some(user_id)
+}
+
+fn wants_native_session(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-toodue-client")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == "native")
+}
+
+async fn user_from_session(st: &AppState, token: &str) -> ApiResult<Option<User>> {
+    let user = sqlx::query_as::<_, User>(&*crate::db::sql(
+        "SELECT u.id, u.email, u.name FROM sessions s \
+         JOIN users u ON u.id = s.user_id \
+         WHERE s.token = ? AND s.expires_at > ?",
+    ))
+    .bind(token)
+    .bind(now_iso())
+    .fetch_optional(&st.db.pool)
+    .await?;
+    Ok(user)
+}
+
 async fn user_from_cookie(st: &AppState, headers: &HeaderMap) -> ApiResult<Option<User>> {
     let Some(token) = cookie_token(headers) else {
         return Ok(None);
@@ -114,8 +204,26 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let st = AppState::from_ref(state);
-        if let Some(user) = user_from_bearer(&st, &parts.headers).await? {
-            return Ok(AuthUser(user));
+        if let Some(token) = native_session_token(parts) {
+            if let Some(user) = user_from_session(&st, &token).await? {
+                return Ok(AuthUser(user));
+            }
+        }
+        if let Some(user_id) = take_link_token(&st, parts) {
+            let user = sqlx::query_as::<_, User>(&*crate::db::sql(
+                "SELECT id, email, name FROM users WHERE id = ?",
+            ))
+            .bind(user_id)
+            .fetch_optional(&st.db.pool)
+            .await?;
+            if let Some(user) = user {
+                return Ok(AuthUser(user));
+            }
+        }
+        if bearer_token(&parts.headers).is_some() {
+            if let Some(user) = user_from_bearer(&st, &parts.headers).await? {
+                return Ok(AuthUser(user));
+            }
         }
         if let Some(user) = user_from_cookie(&st, &parts.headers).await? {
             return Ok(AuthUser(user));
@@ -140,9 +248,18 @@ where
     }
 }
 
-type SessionResponse = (AppendHeaders<[(HeaderName, String); 1]>, Json<User>);
+#[derive(Serialize)]
+pub struct SessionBody {
+    #[serde(flatten)]
+    user: User,
+    /// Only returned to native clients, which can't use the HttpOnly cookie.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_token: Option<String>,
+}
 
-async fn start_session(st: &AppState, user_id: i64) -> ApiResult<SessionResponse> {
+type SessionResponse = (AppendHeaders<[(HeaderName, String); 1]>, Json<SessionBody>);
+
+async fn start_session(st: &AppState, user_id: i64, native: bool) -> ApiResult<SessionResponse> {
     let token = random_token();
     let expires = (Utc::now() + Duration::days(SESSION_DAYS))
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
@@ -165,7 +282,14 @@ async fn start_session(st: &AppState, user_id: i64) -> ApiResult<SessionResponse
         "{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         SESSION_DAYS * 24 * 3600
     );
-    Ok((AppendHeaders([(header::SET_COOKIE, cookie)]), Json(user)))
+    let session_token = native.then(|| token.clone());
+    Ok((
+        AppendHeaders([(header::SET_COOKIE, cookie)]),
+        Json(SessionBody {
+            user,
+            session_token,
+        }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -177,6 +301,7 @@ pub struct RegisterBody {
 
 pub async fn register(
     State(st): State<AppState>,
+    headers: HeaderMap,
     Json(b): Json<RegisterBody>,
 ) -> ApiResult<SessionResponse> {
     let email = b.email.trim().to_lowercase();
@@ -232,7 +357,7 @@ pub async fn register(
     .execute(&st.db.pool)
     .await?;
 
-    start_session(&st, user_id).await
+    start_session(&st, user_id, wants_native_session(&headers)).await
 }
 
 #[derive(Deserialize)]
@@ -243,6 +368,7 @@ pub struct LoginBody {
 
 pub async fn login(
     State(st): State<AppState>,
+    headers: HeaderMap,
     Json(b): Json<LoginBody>,
 ) -> ApiResult<SessionResponse> {
     let email = b.email.trim().to_lowercase();
@@ -258,14 +384,17 @@ pub async fn login(
     Argon2::default()
         .verify_password(b.password.as_bytes(), &parsed)
         .map_err(|_| ApiError::bad_request("invalid email or password"))?;
-    start_session(&st, user_id).await
+    start_session(&st, user_id, wants_native_session(&headers)).await
 }
 
 pub async fn logout(
     State(st): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<AppendHeaders<[(HeaderName, String); 1]>> {
-    if let Some(token) = cookie_token(&headers) {
+    for token in [cookie_token(&headers), bearer_token(&headers)]
+        .into_iter()
+        .flatten()
+    {
         sqlx::query(&*crate::db::sql("DELETE FROM sessions WHERE token = ?"))
             .bind(&token)
             .execute(&st.db.pool)
@@ -277,4 +406,18 @@ pub async fn logout(
 
 pub async fn me(AuthUser(user): AuthUser) -> Json<User> {
     Json(user)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::link_path_allowed;
+
+    #[test]
+    fn link_paths_are_restricted() {
+        assert!(link_path_allowed("/google/connect"));
+        assert!(link_path_allowed("/attachments/42"));
+        assert!(!link_path_allowed("/attachments/"));
+        assert!(!link_path_allowed("/attachments/42/../x"));
+        assert!(!link_path_allowed("/tasks"));
+    }
 }

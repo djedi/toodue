@@ -1,13 +1,16 @@
 <script>
+  import { untrack } from 'svelte';
   import { ui, data, navigate, inboxProject } from '../state.svelte.js';
   import { todayStr } from '../dates.js';
   import { Inbox, CalendarCheck, CalendarDays, LayoutGrid } from '@lucide/svelte';
+  import { nativeTabsEnabled, NativeTabs, watchOverlays } from '../nativeTabs.js';
 
+  // `symbol` is the SF Symbol the native iOS tab bar uses.
   const tabs = [
-    { view: 'inbox', label: 'Inbox', icon: Inbox },
-    { view: 'today', label: 'Today', icon: CalendarCheck },
-    { view: 'upcoming', label: 'Upcoming', icon: CalendarDays },
-    { view: 'projects', label: 'Projects', icon: LayoutGrid }
+    { view: 'inbox', label: 'Inbox', icon: Inbox, symbol: 'tray' },
+    { view: 'today', label: 'Today', icon: CalendarCheck, symbol: 'calendar.badge.checkmark' },
+    { view: 'upcoming', label: 'Upcoming', icon: CalendarDays, symbol: 'calendar' },
+    { view: 'projects', label: 'Projects', icon: LayoutGrid, symbol: 'square.grid.2x2' }
   ];
 
   const counts = $derived({
@@ -15,8 +18,54 @@
     today: data.tasks.filter((t) => t.due_date && t.due_date <= todayStr() && !t.completed_at)
       .length
   });
+
+  let overlayOpen = $state(false);
+  let narrow = $state(true);
+  let useNative = $state(nativeTabsEnabled);
+  const fallBack = () => (useNative = false);
+
+  if (nativeTabsEnabled) {
+    $effect(() => {
+      const handle = NativeTabs.addListener('tabSelected', ({ id }) => navigate(id));
+      const stopWatching = watchOverlays((open) => (overlayOpen = open));
+      // Mirror the web nav's md:hidden breakpoint (iPad uses the sidebar).
+      const mq = matchMedia('(max-width: 767px)');
+      const onMq = () => (narrow = mq.matches);
+      onMq();
+      mq.addEventListener('change', onMq);
+      return () => {
+        handle.then((h) => h.remove());
+        stopWatching();
+        mq.removeEventListener('change', onMq);
+        NativeTabs.hide().catch(fallBack);
+      };
+    });
+
+    $effect(() => {
+      // Re-send the accent when the color scheme changes.
+      void ui.colorScheme;
+      if (narrow && !overlayOpen) {
+        NativeTabs.show({
+          tabs: tabs.map((t) => ({ id: t.view, label: t.label, icon: t.symbol })),
+          selected: untrack(() => ui.view),
+          tint: getComputedStyle(document.documentElement).getPropertyValue('--color-brand-600').trim()
+        }).catch(fallBack);
+      } else {
+        NativeTabs.hide().catch(fallBack);
+      }
+    });
+
+    $effect(() => {
+      NativeTabs.select({ id: ui.view }).catch(fallBack);
+    });
+
+    $effect(() => {
+      NativeTabs.setBadges({ badges: { ...counts } }).catch(fallBack);
+    });
+  }
 </script>
 
+{#if !useNative}
 <nav
   class="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-200 bg-white/95 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden"
   style="padding-bottom: env(safe-area-inset-bottom)"
@@ -44,3 +93,4 @@
     {/each}
   </div>
 </nav>
+{/if}

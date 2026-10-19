@@ -1,3 +1,5 @@
+import { isNative, sessionToken, setSessionToken, apiUrl } from './native.js';
+
 let onUnauthorized = () => {};
 
 export class OfflineError extends Error {
@@ -17,6 +19,11 @@ export function setUnauthorizedHandler(fn) {
 
 export async function request(method, path, body) {
   const opts = { method, headers: {} };
+  const token = sessionToken();
+  if (isNative) {
+    opts.headers['X-TooDue-Client'] = 'native';
+    if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  }
   if (body !== undefined) {
     if (body instanceof FormData) {
       opts.body = body;
@@ -27,7 +34,7 @@ export async function request(method, path, body) {
   }
   let res;
   try {
-    res = await fetch('/api' + path, opts);
+    res = await fetch(apiUrl(path), opts);
   } catch (err) {
     if (typeof navigator === 'undefined' || navigator.onLine === false || err instanceof TypeError) {
       throw new OfflineError();
@@ -35,6 +42,9 @@ export async function request(method, path, body) {
     throw err;
   }
   if (res.status === 401) {
+    // A stale request finishing after a fresh sign-in mustn't log the user out.
+    if (token !== sessionToken()) throw new Error('Not signed in');
+    setSessionToken(null);
     onUnauthorized();
     throw new Error('Not signed in');
   }
@@ -46,7 +56,14 @@ export async function request(method, path, body) {
     throw new Error(msg);
   }
   const ct = res.headers.get('content-type') || '';
-  return ct.includes('application/json') ? res.json() : res.text();
+  if (!ct.includes('application/json')) return res.text();
+  const json = await res.json();
+  // Native sign-in responses carry the session token alongside the user.
+  if (isNative && json && typeof json === 'object' && typeof json.session_token === 'string') {
+    setSessionToken(json.session_token);
+    delete json.session_token;
+  }
+  return json;
 }
 
 export const api = {

@@ -7,3 +7,4 @@ frontend/public/icons/
 .env
 .DS_Store
 *.log
+.env.*.local

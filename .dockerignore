@@ -5,3 +5,5 @@ frontend/dist
 frontend/dev-dist
 frontend/public/icons
 .git
+frontend/ios
+frontend/android

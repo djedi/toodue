@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TooDue</string>
+    <string name="title_activity_main">TooDue</string>
+    <string name="package_name">com.redseam.toodue</string>
+    <string name="custom_url_scheme">com.redseam.toodue</string>
+</resources>

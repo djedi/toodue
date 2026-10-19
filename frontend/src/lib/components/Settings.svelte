@@ -2,6 +2,7 @@
   import { api } from '../api.js';
   import { apiKeyCreatedMessage, maskApiKey } from '../apiKeys.js';
   import { summarizeScope } from '../oauth.js';
+  import { API_BASE, apiUrl, openApiLink } from '../native.js';
   import { data, ui, refresh, signOut, toast } from '../state.svelte.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import ColorSchemePicker from './ColorSchemePicker.svelte';
@@ -30,8 +31,18 @@
   let mcpUrl = $state('');
   let connections = $state([]);
 
-  $effect(() => {
+  const loadGoogleStatus = () =>
     api.get('/google/status').then((g) => (google = g)).catch(() => {});
+
+  // Native apps connect Google in the system browser, so re-check on return.
+  $effect(() => {
+    const onVisible = () => document.visibilityState === 'visible' && loadGoogleStatus();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  });
+
+  $effect(() => {
+    loadGoogleStatus();
     api.get('/api-keys').then((keys) => (apiKeys = keys)).catch(() => {});
     api.get('/mcp/info').then((r) => (mcpUrl = r.mcp_url)).catch(() => {});
     api.get('/oauth/connections').then((c) => (connections = c)).catch(() => {});
@@ -137,7 +148,7 @@
   async function copyCalendarUrl() {
     try {
       const { url } = await api.get('/me/calendar');
-      const absolute = location.origin + url;
+      const absolute = (API_BASE || location.origin) + url;
       await navigator.clipboard.writeText(absolute);
       toast('Calendar feed URL copied — subscribe to it in Google Calendar or Fantastical');
     } catch (err) {
@@ -208,7 +219,7 @@
             </button>
           </div>
         {:else}
-          <a href="/api/google/connect" class={row}>
+          <a href={apiUrl('/google/connect')} onclick={(e) => openApiLink(e, '/google/connect', api.post).catch((err) => toast(err.message))} class={row}>
             <CalendarSync size={18} class="text-zinc-400" />
             <span class="flex-1">
               <span class="block text-sm font-medium">Connect Google Calendar</span>
