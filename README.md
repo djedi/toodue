@@ -105,6 +105,28 @@ metadata advertises the right origin behind your proxy.
 Setup for each client: [`docs/mcp.html`](docs/mcp.html). Technical reference:
 [`docs/api-mcp.md`](docs/api-mcp.md).
 
+## Native apps (iOS & Android)
+
+The same Svelte frontend ships as native apps via [Capacitor](https://capacitorjs.com)
+(`frontend/ios`, `frontend/android`). The web assets are bundled into the app and talk
+to a TooDue server over HTTPS, set by `VITE_API_BASE` in `frontend/.env.native`
+(defaults to `https://app.toodue.com`; override in `.env.native.local` for your own server).
+
+```bash
+cd frontend
+npm run build:native   # vite build --mode native + cap sync
+npm run ios            # build, sync, open Xcode
+npm run android        # build, sync, open Android Studio (needs JDK 21+)
+```
+
+To test against a local plain-http backend, put `VITE_API_BASE=http://localhost:8080` in
+`.env.native.local` and sync with `CAP_DEV_HTTP=1` (on Android also run
+`adb reverse tcp:8080 tcp:8080`).
+
+Native clients can't use the session cookie cross-origin, so sign-in returns a session
+token (when the request sends `X-TooDue-Client: native`) that is sent as a bearer header.
+The server allows CORS from the Capacitor origins (`capacitor://localhost`, `https://localhost`).
+
 ## Architecture
 
 - `backend/` — Rust (axum + sqlx/SQLite). REST API under `/api`, SSE stream at `/api/events`,

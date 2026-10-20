@@ -1,4 +1,5 @@
 <script>
+  import { apiUrl, openApiLink } from '../native.js';
   import { api } from '../api.js';
   import {
     data,
@@ -366,7 +367,7 @@
                   <Paperclip size={14} class="flex-none text-zinc-400" />
                   <span class="min-w-0 flex-1 truncate">{att.filename}</span>
                   <span class="text-xs text-zinc-400">{fmtSize(att.size)}</span>
-                  <a href="/api/attachments/{att.id}" download aria-label="Download" class="p-1 text-zinc-400 hover:text-brand-600">
+                  <a href={apiUrl(`/attachments/${att.id}`)} onclick={(e) => openApiLink(e, `/attachments/${att.id}`, api.post).catch((err) => toast(err.message))} download aria-label="Download" class="p-1 text-zinc-400 hover:text-brand-600">
                     <Download size={14} />
                   </a>
                   <button aria-label="Delete attachment" onclick={() => deleteAttachment(att.id)} class="p-1 text-zinc-400 hover:text-red-600">

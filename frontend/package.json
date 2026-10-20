@@ -8,17 +8,25 @@
     "build": "node scripts/gen-icons.mjs && vite build",
     "preview": "vite preview",
     "icons": "node scripts/gen-icons.mjs",
-    "test": "node --test src/**/*.test.js"
+    "test": "node --test src/**/*.test.js",
+    "build:native": "node scripts/gen-icons.mjs && vite build --mode native && cap sync",
+    "ios": "npm run build:native && cap open ios",
+    "android": "npm run build:native && cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
     "@lucide/svelte": "latest"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tailwindcss/vite": "^4.0.0",
     "sharp": "^0.35.3",
     "svelte": "^5.0.0",
     "tailwindcss": "^4.0.0",
+    "typescript": "^7.0.2",
     "vite": "^6.0.0",
     "vite-plugin-pwa": "^0.21.0"
   }

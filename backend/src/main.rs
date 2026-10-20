@@ -14,9 +14,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::DefaultBodyLimit;
+use axum::http::{header, HeaderName, HeaderValue};
 use axum::routing::{delete, get, post};
 use axum::Router;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
@@ -27,6 +28,7 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub http: reqwest::Client,
     pub oauth_states: gcal::OauthStates,
+    pub link_tokens: auth::LinkTokens,
 }
 
 #[tokio::main]
@@ -48,6 +50,7 @@ async fn main() {
         data_dir,
         http: reqwest::Client::new(),
         oauth_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        link_tokens: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     // Keep Google Calendar watch channels alive and sync tokens primed.
@@ -79,6 +82,7 @@ async fn main() {
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
+        .route("/auth/link-token", post(auth::link_token))
         .route("/me", get(auth::me))
         .route(
             "/api-keys",
@@ -165,7 +169,22 @@ async fn main() {
         .route("/google/connect", get(gcal::connect))
         .route("/google/callback", get(gcal::callback))
         .route("/google/disconnect", post(gcal::disconnect))
-        .route("/google/webhook", post(gcal::webhook));
+        .route("/google/webhook", post(gcal::webhook))
+        // The Capacitor iOS/Android shells serve the SPA from these local origins
+        // and authenticate with bearer session tokens, never cookies.
+        .layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::list([
+                    HeaderValue::from_static("capacitor://localhost"),
+                    HeaderValue::from_static("https://localhost"),
+                ]))
+                .allow_methods(Any)
+                .allow_headers([
+                    header::AUTHORIZATION,
+                    header::CONTENT_TYPE,
+                    HeaderName::from_static("x-toodue-client"),
+                ]),
+        );
 
     let static_dir =
         PathBuf::from(std::env::var("STATIC_DIR").unwrap_or_else(|_| "./static".into()));

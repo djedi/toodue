@@ -1,5 +1,6 @@
 import { api, request, setUnauthorizedHandler, isOfflineError } from './api.js';
 import { todayStr } from './dates.js';
+import { apiUrl, setSessionToken } from './native.js';
 import {
   clearOfflineState,
   createOfflineProject,
@@ -240,7 +241,7 @@ let es;
 export function connectSSE() {
   if (data.offline) return;
   if (es) es.close();
-  es = new EventSource('/api/events');
+  es = new EventSource(apiUrl('/events', { withToken: true }));
   es.onopen = () => {
     data.offline = false;
   };
@@ -531,6 +532,7 @@ export async function signOut() {
   try {
     await api.post('/auth/logout');
   } catch {}
+  setSessionToken(null);
   disconnectSSE();
   clearOfflineState();
   data.user = null;
