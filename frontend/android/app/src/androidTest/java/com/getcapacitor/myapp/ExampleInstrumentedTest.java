@@ -21,6 +21,6 @@ public class ExampleInstrumentedTest {
         // Context of the app under test.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
-        assertEquals("com.redseam.toodue", appContext.getPackageName());
+        assertEquals("com.toodue.toodue", appContext.getPackageName());
     }
 }

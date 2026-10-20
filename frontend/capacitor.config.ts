@@ -5,12 +5,9 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const devHttp = !!process.env.CAP_DEV_HTTP;
 
 const config: CapacitorConfig = {
-  appId: 'com.redseam.toodue',
+  appId: 'com.toodue.toodue',
   appName: 'TooDue',
   webDir: 'dist',
-  ios: {
-    contentInset: 'always'
-  },
   ...(devHttp && {
     server: { cleartext: true },
     android: { allowMixedContent: true }

@@ -8,3 +8,7 @@ frontend/public/icons/
 .DS_Store
 *.log
 .env.*.local
+frontend/build/
+frontend/fastlane/.env
+frontend/fastlane/report.xml
+frontend/fastlane/README.md

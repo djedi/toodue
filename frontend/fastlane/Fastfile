@@ -1,0 +1,63 @@
+default_platform(:ios)
+
+APP_ROOT = File.expand_path("..", __dir__)
+IOS_PROJECT = File.join(APP_ROOT, "ios", "App", "App.xcodeproj")
+BUILD_DIR = File.join(APP_ROOT, "build", "ios")
+
+# App Store Connect API key from fastlane/.env (see .env.example).
+def asc_api_key
+  key_id = ENV["ASC_KEY_ID"]
+  issuer_id = ENV["ASC_ISSUER_ID"]
+  key_path = File.expand_path(ENV["ASC_KEY_PATH"].to_s)
+  if key_id.to_s.empty? || issuer_id.to_s.empty? || !File.file?(key_path)
+    UI.user_error!("Set ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_PATH in fastlane/.env")
+  end
+  app_store_connect_api_key(key_id: key_id, issuer_id: issuer_id, key_filepath: key_path)
+end
+
+# The production API base from .env.native. Passed explicitly so a developer's
+# .env.native.local (e.g. a localhost backend) can never leak into a release.
+def release_api_base
+  line = File.readlines(File.join(APP_ROOT, ".env.native")).find { |l| l.start_with?("VITE_API_BASE=") }
+  UI.user_error!("VITE_API_BASE missing from .env.native") unless line
+  line.split("=", 2).last.strip
+end
+
+platform :ios do
+  desc "Build the web app, archive a signed release and upload it to TestFlight"
+  lane :beta do
+    api_key = asc_api_key
+
+    Dir.chdir(APP_ROOT) do
+      sh("env -u CAP_DEV_HTTP VITE_API_BASE=#{release_api_base.shellescape} npm run build:native")
+    end
+
+    build_number = latest_testflight_build_number(api_key: api_key, initial_build_number: 0) + 1
+    increment_build_number(xcodeproj: IOS_PROJECT, build_number: build_number)
+
+    key_path = File.expand_path(ENV["ASC_KEY_PATH"])
+    # The IPA export shells out to rsync and only works with Apple's
+    # /usr/bin/rsync; a Homebrew rsync earlier on PATH fails with "Copy failed".
+    ENV["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:#{ENV.fetch('PATH', '')}"
+    build_app(
+      project: IOS_PROJECT,
+      scheme: "App",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: BUILD_DIR,
+      output_name: "TooDue.ipa",
+      clean: true,
+      # xcpretty is a Ruby gem; with /usr/bin first it'd run under the system Ruby.
+      xcodebuild_formatter: "",
+      # Automatic signing; Xcode creates/refreshes the profiles via the API key.
+      xcargs: [
+        "-allowProvisioningUpdates",
+        "-authenticationKeyPath #{key_path.shellescape}",
+        "-authenticationKeyID #{ENV['ASC_KEY_ID']}",
+        "-authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID']}"
+      ].join(" ")
+    )
+
+    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true)
+  end
+end
