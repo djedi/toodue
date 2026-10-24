@@ -35,22 +35,23 @@
     e?.preventDefault();
     if (!name.trim() || busy) return;
     busy = true;
+    // addTask inserts the row optimistically, so the dialog can close right away;
+    // a hard failure is reported by toast after the fact.
+    const pending = addTask({
+      project_id,
+      name,
+      description,
+      due_date: due_date || null,
+      due_time: due_date && due_time ? due_time : null,
+      deadline: deadline || null,
+      repeat_rule: normalizeRepeatRule(repeat_rule, due_date),
+      priority: Number(priority)
+    });
+    close();
     try {
-      await addTask({
-        project_id,
-        name,
-        description,
-        due_date: due_date || null,
-        due_time: due_date && due_time ? due_time : null,
-        deadline: deadline || null,
-        repeat_rule: normalizeRepeatRule(repeat_rule, due_date),
-        priority: Number(priority)
-      });
-      close();
+      await pending;
     } catch (err) {
       toast(err.message);
-    } finally {
-      busy = false;
     }
   }
 

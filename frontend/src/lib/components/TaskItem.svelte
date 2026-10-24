@@ -1,7 +1,8 @@
 <script>
-  import { ui, completeTask, projectById } from '../state.svelte.js';
+  import { ui, completeTask, deleteTask, projectById, toast } from '../state.svelte.js';
   import { dayLabel, fmtTime, isOverdue, todayStr } from '../dates.js';
   import { repeatLabel } from '../recurrence.js';
+  import { untrack } from 'svelte';
   import {
     Check,
     CalendarDays,
@@ -10,7 +11,8 @@
     Paperclip,
     GitBranch,
     Repeat2,
-    Hash
+    Hash,
+    Trash2
   } from '@lucide/svelte';
 
   let { task, showProject = false, depth = 0 } = $props();
@@ -40,6 +42,102 @@
     }, 280);
   }
 
+  /* ---------- swipe-to-delete (touch only) ---------- */
+  const ACTION_W = 72; // px, width of the revealed trash button
+  let offset = $state(0); // current translateX of the row, 0..-ACTION_W
+  let dragging = $state(false);
+  let deleting = $state(false);
+  const revealed = $derived(ui.swipedTaskId === task.id);
+  let start = null; // { x, y, offset, axis: null | 'x' | 'y' }
+
+  // Keep the row position in sync with the shared "revealed" state (e.g. another row was swiped open).
+  $effect(() => {
+    if (dragging) return;
+    const target = revealed ? -ACTION_W : 0;
+    if (offset !== target) offset = target;
+  });
+
+  // Collapse any revealed row if the viewport grows past the md breakpoint (e.g. rotation),
+  // where the delete action is hidden.
+  $effect(() => {
+    const mq = matchMedia('(max-width: 767px)');
+    const onChange = () => {
+      if (mq.matches) return;
+      start = null;
+      dragging = false;
+      if (revealed) ui.swipedTaskId = null;
+    };
+    onChange(); // also covers mounting at desktop width with stale swipe state
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  });
+
+  function onTouchStart(e) {
+    // The delete action is only rendered below the md breakpoint; don't let wider touch screens swipe.
+    if (e.touches.length !== 1 || !matchMedia('(max-width: 767px)').matches) return;
+    const t = e.touches[0];
+    start = { x: t.clientX, y: t.clientY, offset: revealed ? -ACTION_W : 0, axis: null };
+  }
+
+  function onTouchMove(e) {
+    if (!start || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (!start.axis) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      start.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (start.axis === 'x') dragging = true;
+    }
+    if (start.axis !== 'x') return;
+    // Allow a little rubber-band past the button, never past the left edge.
+    offset = Math.max(-ACTION_W - 24, Math.min(0, start.offset + dx));
+  }
+
+  function onTouchEnd() {
+    if (!start) return;
+    const wasDragging = start.axis === 'x';
+    start = null;
+    if (!wasDragging) return;
+    dragging = false;
+    if (offset < -ACTION_W / 2) {
+      offset = -ACTION_W;
+      ui.swipedTaskId = task.id;
+    } else {
+      offset = 0;
+      if (revealed) ui.swipedTaskId = null;
+    }
+  }
+
+  // A revealed row that leaves the DOM (view change, list refresh, delete) releases the shared state,
+  // so a non-null ui.swipedTaskId always refers to a mounted row.
+  $effect(() => {
+    return () => {
+      if (untrack(() => ui.swipedTaskId) === task.id) ui.swipedTaskId = null;
+    };
+  });
+
+  function open() {
+    // A tap while a row is swiped open just closes the action instead of opening a task.
+    if (ui.swipedTaskId !== null) {
+      ui.swipedTaskId = null;
+      return;
+    }
+    ui.openTaskId = task.id;
+  }
+
+  async function remove(e) {
+    e.stopPropagation();
+    if (deleting) return;
+    deleting = true;
+    try {
+      await deleteTask(task.id); // clears ui.swipedTaskId for this row itself
+    } catch (err) {
+      deleting = false;
+      toast(err.message);
+    }
+  }
+
   const project = $derived(projectById(task.project_id));
   const dateColor = $derived(
     isOverdue(task.due_date)
@@ -50,13 +148,33 @@
   );
 </script>
 
-<li style="padding-left: {depth * 28}px">
+<li style="padding-left: {depth * 28}px" class="relative overflow-hidden">
+  <!-- Swipe action (mobile only): revealed by dragging the row left. Only in the DOM while visible. -->
+  {#if revealed || offset !== 0}
+    <button
+      type="button"
+      aria-label="Delete task: {task.name}"
+      aria-hidden={!revealed}
+      tabindex={revealed ? 0 : -1}
+      onclick={remove}
+      disabled={deleting}
+      class="absolute inset-y-0 right-0 flex items-center justify-center bg-red-500 text-white disabled:opacity-60 md:hidden"
+      style="width: {ACTION_W}px"
+    >
+      <Trash2 size={20} />
+    </button>
+  {/if}
   <div
     role="button"
     tabindex="0"
-    onclick={() => (ui.openTaskId = task.id)}
+    onclick={open}
     onkeydown={(e) => e.key === 'Enter' && (ui.openTaskId = task.id)}
-    class="group flex w-full cursor-pointer gap-3 border-b border-zinc-100 px-1 py-2.5 text-left dark:border-zinc-800/70"
+    ontouchstart={onTouchStart}
+    ontouchmove={onTouchMove}
+    ontouchend={onTouchEnd}
+    ontouchcancel={onTouchEnd}
+    style="transform: translateX({offset}px); transition: {dragging ? 'none' : 'transform 180ms ease'}; touch-action: pan-y pinch-zoom"
+    class="group relative flex w-full cursor-pointer gap-3 border-b border-zinc-100 bg-white px-1 py-2.5 text-left dark:border-zinc-800/70 dark:bg-zinc-950"
   >
     <button aria-label={done ? 'Mark incomplete' : 'Complete task'} onclick={toggle} class="task-check {checkColors[task.priority]} {done ? 'bg-current/10' : ''}">
       {#if done}

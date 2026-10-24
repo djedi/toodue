@@ -31,6 +31,7 @@ export const ui = $state({
   view: 'today',
   projectId: null,
   openTaskId: null,
+  swipedTaskId: null, // task row whose swipe-to-delete action is revealed (mobile)
   quickAdd: null, // null or { project_id?, due_date?, parent_id? }
   showSettings: false,
   toast: null,
@@ -42,6 +43,7 @@ export const ui = $state({
 export const bus = new EventTarget();
 
 setUnauthorizedHandler(() => {
+  resetMutationState();
   if (!data.offline && data.user) data.user = null;
 });
 
@@ -145,6 +147,7 @@ export function navigate(view, projectId = null) {
 }
 
 export function syncRoute() {
+  ui.swipedTaskId = null;
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   if (parts[0] === 'project' && parts[1]) {
     ui.view = 'project';
@@ -197,7 +200,7 @@ export async function refresh() {
   try {
     const [projects, tasks, templates] = await Promise.all([api.get('/projects'), api.get('/tasks'), api.get('/templates')]);
     data.projects = projects;
-    data.tasks = tasks;
+    applyServerTasks(tasks);
     data.templates = templates;
     data.offline = false;
     saveCurrentSnapshot();
@@ -207,9 +210,21 @@ export async function refresh() {
   }
 }
 
+// Replace the task list with the server's, keeping optimistic state: rows for creates still in
+// flight, pending edits re-applied on top of fresh confirmed state, and local deletions hidden.
+function applyServerTasks(tasks) {
+  const inflight = data.tasks.filter((t) => pendingCreates.has(t.id));
+  data.tasks = [...tasks.filter((t) => !deletedTaskIds.has(t.id)), ...inflight];
+  for (const [id, edit] of taskEdits) {
+    const fresh = tasks.find((t) => t.id === id);
+    if (fresh) edit.base = fresh;
+    projectTask(id);
+  }
+}
+
 export async function refreshTasks() {
   try {
-    data.tasks = await api.get('/tasks');
+    applyServerTasks(await api.get('/tasks'));
     data.offline = false;
     saveCurrentSnapshot();
   } catch (err) {
@@ -276,10 +291,24 @@ function handleEvent({ type, data: d }) {
   switch (type) {
     case 'task.upsert':
       // The main list only holds incomplete tasks; detail views listen on the bus.
-      if (d.completed_at) data.tasks = data.tasks.filter((t) => t.id !== d.id);
-      else upsert(data.tasks, d);
+      reconcileTask(d);
       break;
     case 'task.remove':
+      // Another client deleted it: make sure no pending edit here can bring it back.
+      for (const t of data.tasks) {
+        if (t.id === d.id || t.parent_id === d.id) {
+          deletedTaskIds.add(t.id);
+          taskEdits.delete(t.id);
+        }
+      }
+      for (const [cid, e] of taskEdits) {
+        if (e.base.parent_id === d.id) {
+          deletedTaskIds.add(cid);
+          taskEdits.delete(cid);
+        }
+      }
+      deletedTaskIds.add(d.id);
+      taskEdits.delete(d.id);
       data.tasks = data.tasks.filter((t) => t.id !== d.id && t.parent_id !== d.id);
       if (ui.openTaskId === d.id) ui.openTaskId = null;
       break;
@@ -297,6 +326,14 @@ function handleEvent({ type, data: d }) {
     }
     case 'project.remove':
       data.projects = data.projects.filter((p) => p.id !== d.id);
+      // Pending edits on the project's tasks must not bring them back.
+      for (const t of data.tasks) if (t.project_id === d.id) deletedTaskIds.add(t.id);
+      for (const [tid, e] of taskEdits) {
+        if (e.base.project_id === d.id) {
+          deletedTaskIds.add(tid);
+          taskEdits.delete(tid);
+        }
+      }
       data.tasks = data.tasks.filter((t) => t.project_id !== d.id);
       if (ui.view === 'project' && ui.projectId === d.id) navigate('projects');
       break;
@@ -337,47 +374,189 @@ export async function syncOfflineQueue() {
   }
 }
 
+/*
+ * Mutations apply to local state immediately (optimistic), then reconcile with the server
+ * response. On a network failure the change is queued for later sync; on any other error the
+ * local change is rolled back and the error is rethrown so callers can toast it.
+ */
+
+// Temp id -> promise of the real task, for creates still in flight. A patch or delete on a
+// just-added task waits for the server id instead of hitting /tasks/<temp id>.
+const pendingCreates = new Map();
+// Temp id -> real id for creates that have completed (delayed callbacks may still hold the temp id).
+const createdIds = new Map();
+
+// Ids deleted optimistically (or confirmed deleted); a late edit must not resurrect them.
+const deletedTaskIds = new Set();
+
+// Whether a task was deleted locally (pending or confirmed) this session.
+export function isTaskDeleted(id) {
+  return deletedTaskIds.has(id);
+}
+
+export async function resolveId(id) {
+  if (createdIds.has(id)) return createdIds.get(id);
+  const pending = pendingCreates.get(id);
+  if (!pending) return id;
+  const real = await pending;
+  return real ? real.id : id;
+}
+
+/*
+ * Per-task edit pipeline. Each task keeps its last confirmed state plus the edits still in
+ * flight; the visible row is always confirmed + pending edits, so a response or failure for
+ * one edit never clobbers or resurrects another. Requests for one task run in order.
+ */
+const taskEdits = new Map(); // id -> { base, pending: [{ fields }], chain: Promise }
+
+// Bumped on sign-out so continuations of the previous user's mutations become no-ops.
+let sessionGen = 0;
+
+function resetMutationState() {
+  sessionGen++;
+  pendingCreates.clear();
+  createdIds.clear();
+  deletedTaskIds.clear();
+  taskEdits.clear();
+}
+
+// Server state for a task arrived (event or refresh): it becomes the confirmed base and the
+// pending edits are re-applied on top, so an earlier edit's broadcast can't undo a later one.
+function reconcileTask(t) {
+  if (deletedTaskIds.has(t.id)) return;
+  const edit = taskEdits.get(t.id);
+  if (edit) {
+    edit.base = t;
+    projectTask(t.id);
+  } else if (t.completed_at) {
+    data.tasks = data.tasks.filter((x) => x.id !== t.id);
+  } else {
+    upsert(data.tasks, t);
+  }
+}
+
+function projectTask(id) {
+  const edit = taskEdits.get(id);
+  if (!edit) return;
+  let t = edit.base;
+  for (const op of edit.pending) t = applyLocalTaskPatch(t, op.fields);
+  if (deletedTaskIds.has(id)) return;
+  if (t.completed_at) data.tasks = data.tasks.filter((x) => x.id !== id);
+  else upsert(data.tasks, t);
+}
+
 export async function addTask(fields) {
+  const gen = sessionGen;
+  if (fields.parent_id != null) fields = { ...fields, parent_id: await resolveId(fields.parent_id) };
+  if (gen !== sessionGen) throw new Error('Signed out');
+  const taskFields = { ...fields, project_id: fields.project_id ?? inboxProject()?.id };
+  const temp = createOfflineTask(taskFields, { userId: data.user?.id });
+  upsert(data.tasks, temp);
+  saveCurrentSnapshot();
+
+  let settle;
+  pendingCreates.set(temp.id, new Promise((r) => (settle = r)));
   try {
     const t = await api.post('/tasks', fields);
-    upsert(data.tasks, t);
+    if (gen !== sessionGen) {
+      settle(null);
+      return t;
+    }
+    // The SSE event may already have inserted the real row; replace the temp one either way.
+    data.tasks = data.tasks.filter((x) => x.id !== temp.id);
+    const gone = deletedTaskIds.has(temp.id) || deletedTaskIds.has(t.id) || (t.parent_id != null && deletedTaskIds.has(t.parent_id));
+    if (gone) deletedTaskIds.add(t.id);
+    else upsert(data.tasks, t);
+    if (ui.openTaskId === temp.id) ui.openTaskId = t.id;
+    createdIds.set(temp.id, t.id);
     saveCurrentSnapshot();
+    settle(t);
     return t;
   } catch (err) {
-    if (!mutationOffline(err)) throw err;
-    const taskFields = { ...fields, project_id: fields.project_id ?? inboxProject()?.id };
-    const t = createOfflineTask(taskFields, { userId: data.user?.id });
-    queueTaskCreate(t);
-    upsert(data.tasks, t);
+    if (gen !== sessionGen) {
+      settle(null);
+      throw err;
+    }
+    if (!mutationOffline(err)) {
+      data.tasks = data.tasks.filter((x) => x.id !== temp.id);
+      saveCurrentSnapshot();
+      settle(null);
+      throw err;
+    }
+    if (deletedTaskIds.has(temp.id) || (temp.parent_id != null && deletedTaskIds.has(temp.parent_id))) {
+      settle(null);
+      return temp;
+    }
+    upsert(data.tasks, temp); // a refresh may have dropped the row while the POST was pending
+    queueTaskCreate(temp);
     saveCurrentSnapshot();
     offlineToast();
-    return t;
+    settle(temp);
+    return temp;
+  } finally {
+    if (gen === sessionGen) pendingCreates.delete(temp.id);
   }
 }
 
 export async function updateTask(id, fields) {
-  const existing = data.tasks.find((task) => task.id === id);
-  try {
+  const gen = sessionGen;
+  id = await resolveId(id);
+  if (gen !== sessionGen) throw new Error('Signed out');
+  let edit = taskEdits.get(id);
+  const existing = edit ? edit.base : data.tasks.find((task) => task.id === id);
+  if (!existing) {
+    // Not in the main list (e.g. a completed task): nothing to show optimistically.
     const t = await api.patch(`/tasks/${id}`, fields);
-    if (t.completed_at) data.tasks = data.tasks.filter((x) => x.id !== t.id);
-    else upsert(data.tasks, t);
-    if (fields.completed === true && (existing?.repeat_rule || t.repeat_rule)) {
-      await refreshTasks();
-    }
+    if (gen !== sessionGen) return t;
+    reconcileTask(t);
     saveCurrentSnapshot();
     return t;
-  } catch (err) {
-    if (!mutationOffline(err)) throw err;
-    const task = data.tasks.find((t) => t.id === id);
-    if (!task) throw err;
-    const local = applyLocalTaskPatch(task, fields);
-    queueTaskPatch(id, fields);
-    if (local.completed_at) data.tasks = data.tasks.filter((x) => x.id !== id);
-    else upsert(data.tasks, local);
-    saveCurrentSnapshot();
-    offlineToast();
-    return local;
   }
+
+  if (!edit) {
+    edit = { base: existing, pending: [], chain: Promise.resolve() };
+    taskEdits.set(id, edit);
+  }
+  const op = { fields };
+  edit.pending.push(op);
+  projectTask(id);
+
+  const settle = () => {
+    edit.pending = edit.pending.filter((x) => x !== op);
+    projectTask(id);
+    // Keep the confirmed state around while a delete is pending so its rollback can use it.
+    if (!edit.pending.length && !deletedTaskIds.has(id)) taskEdits.delete(id);
+    saveCurrentSnapshot();
+  };
+
+  const run = async () => {
+    if (gen !== sessionGen) throw new Error('Signed out');
+    try {
+      const t = await api.patch(`/tasks/${id}`, fields);
+      if (gen !== sessionGen) return t;
+      edit.base = t;
+      settle();
+      if (fields.completed === true && (existing.repeat_rule || t.repeat_rule)) {
+        await refreshTasks();
+      }
+      return t;
+    } catch (err) {
+      if (gen !== sessionGen) throw err;
+      if (!mutationOffline(err)) {
+        settle(); // drop just this edit; the confirmed state and other pending edits stay
+        throw err;
+      }
+      // Queued for sync: treat it as applied to the confirmed state so it stays visible.
+      edit.base = applyLocalTaskPatch(edit.base, fields);
+      if (!deletedTaskIds.has(id)) queueTaskPatch(id, fields); // a queued delete would 404 it
+      settle();
+      offlineToast();
+      return edit.base;
+    }
+  };
+  const result = edit.chain.catch(() => {}).then(run);
+  edit.chain = result;
+  return result;
 }
 
 export async function completeTask(task, completed) {
@@ -392,15 +571,53 @@ export async function completeTask(task, completed) {
 }
 
 export async function deleteTask(id) {
+  const gen = sessionGen;
+  id = await resolveId(id);
+  if (gen !== sessionGen) throw new Error('Signed out');
+  // Children hidden by an optimistic completion live only in their edit pipeline; include them.
+  const hiddenChildren = [...taskEdits.entries()]
+    .filter(([cid, e]) => e.base.parent_id === id && !data.tasks.some((t) => t.id === cid))
+    .map(([cid, e]) => e.base);
+  const removed = [...data.tasks.filter((t) => t.id === id || t.parent_id === id), ...hiddenChildren];
+  deletedTaskIds.add(id);
+  for (const t of removed) deletedTaskIds.add(t.id);
+  data.tasks = data.tasks.filter((t) => t.id !== id && t.parent_id !== id);
+  if (ui.openTaskId === id) ui.openTaskId = null;
+  if (ui.swipedTaskId === id) ui.swipedTaskId = null;
+  // Views holding their own task lists (e.g. a project's completed tasks) drop the row here.
+  bus.dispatchEvent(new CustomEvent('task-deleted', { detail: { id } }));
   try {
     await api.del(`/tasks/${id}`);
+    if (gen !== sessionGen) return;
   } catch (err) {
-    if (!mutationOffline(err)) throw err;
+    if (gen !== sessionGen) throw err;
+    if (!mutationOffline(err)) {
+      // Restore the rows that were removed optimistically, unless a server event replaced them.
+      deletedTaskIds.delete(id);
+      for (const t of removed) deletedTaskIds.delete(t.id);
+      const current = new Set(data.tasks.map((t) => t.id));
+      const ids = new Set([id, ...removed.map((t) => t.id)]);
+      for (const tid of ids) {
+        if (current.has(tid)) continue;
+        // A row with edits in flight comes back from its pipeline (confirmed + pending), not the stale copy.
+        if (taskEdits.has(tid)) projectTask(tid);
+        else {
+          const copy = removed.find((t) => t.id === tid);
+          if (copy) data.tasks.push(copy);
+        }
+      }
+      for (const tid of ids) {
+        const e = taskEdits.get(tid);
+        if (e && !e.pending.length) taskEdits.delete(tid);
+      }
+      saveCurrentSnapshot();
+      bus.dispatchEvent(new CustomEvent('task-delete-failed', { detail: { id } }));
+      throw err;
+    }
     queueTaskDelete(id);
     offlineToast();
   }
-  data.tasks = data.tasks.filter((t) => t.id !== id && t.parent_id !== id);
-  if (ui.openTaskId === id) ui.openTaskId = null;
+  for (const t of removed) taskEdits.delete(t.id);
   saveCurrentSnapshot();
 }
 
@@ -535,6 +752,7 @@ export async function signOut() {
   setSessionToken(null);
   disconnectSSE();
   clearOfflineState();
+  resetMutationState();
   data.user = null;
   data.projects = [];
   data.tasks = [];

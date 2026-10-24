@@ -10,8 +10,10 @@
     addTask,
     completeTask,
     projectById,
+    resolveId,
     toast
   } from '../state.svelte.js';
+  import { untrack } from 'svelte';
   import { fmtTimestamp, fmtTime, dayLabel, todayStr } from '../dates.js';
   import { repeatOptions } from '../recurrence.js';
   import DatePicker from './DatePicker.svelte';
@@ -38,18 +40,17 @@
   let newComment = $state('');
   let fileInput = $state(null);
   let pickerFor = $state(null); // 'due' | 'deadline'
+  let loadGen = 0; // stale detail responses are dropped
+  let pendingSaves = 0; // while > 0, keep the optimistic task over server copies
 
   const task = $derived(detail?.task);
   const project = $derived(task ? projectById(task.project_id) : null);
 
   async function load() {
-    try {
-      detail = await api.get(`/tasks/${id}`);
-      name = detail.task.name;
-      description = detail.task.description;
-    } catch (err) {
+    // Show what we already know about the task while the detail request is in flight.
+    if (!detail) {
       const cached = data.tasks.find((t) => t.id === id);
-      if (cached && data.offline) {
+      if (cached) {
         detail = {
           task: cached,
           subtasks: data.tasks.filter((t) => t.parent_id === id),
@@ -58,6 +59,33 @@
         };
         name = cached.name;
         description = cached.description;
+      }
+    }
+    try {
+      // A just-added task may still have a temporary id while its POST is pending.
+      const gen = ++loadGen;
+      const realId = await resolveId(id);
+      if (realId !== id) return; // ui.openTaskId is remapped on success and reloads via the effect
+      const fresh = await api.get(`/tasks/${id}`);
+      if (gen !== loadGen) return;
+      const prev = detail?.task;
+      // While an edit is still being saved, keep our optimistic task; save() reloads once it settles.
+      detail = pendingSaves > 0 && prev ? { ...fresh, task: prev } : fresh;
+      // Don't clobber text the user has typed while the request was in flight.
+      if (!prev || name === prev.name) name = detail.task.name;
+      if (!prev || description === prev.description) description = detail.task.description;
+    } catch (err) {
+      const cached = data.tasks.find((t) => t.id === id);
+      if (cached && data.offline) {
+        const prev = detail?.task;
+        detail = {
+          task: cached,
+          subtasks: data.tasks.filter((t) => t.parent_id === id),
+          comments: [],
+          attachments: []
+        };
+        if (!prev || name === prev.name) name = cached.name;
+        if (!prev || description === prev.description) description = cached.description;
         return;
       }
       toast(err.message);
@@ -67,7 +95,7 @@
 
   $effect(() => {
     id;
-    load();
+    untrack(load);
   });
 
   // Refresh the open task when a server event touches it.
@@ -95,11 +123,41 @@
   }
 
   async function save(fields) {
+    // Reflect the change in the dialog immediately; the reload reconciles with the server.
+    const prevTask = detail?.task;
+    if (detail) {
+      const t = { ...detail.task, ...fields };
+      if ('completed' in fields) t.completed_at = fields.completed ? new Date().toISOString() : null;
+      if (fields.due_date === null) {
+        t.due_time = null;
+        t.repeat_rule = null;
+      }
+      detail = { ...detail, task: t };
+    }
+    pendingSaves++;
     try {
       await updateTask(id, fields);
+      pendingSaves--;
       await load();
     } catch (err) {
+      pendingSaves--;
       toast(err.message);
+      // Undo the optimistic values (unless the user has typed further) and reload what the server has.
+      if (prevTask && detail) {
+        // Roll back only the fields this save touched, and only if a later save hasn't changed them.
+        const t = { ...detail.task };
+        for (const key of Object.keys(fields)) {
+          if (key === 'completed') {
+            t.completed_at = prevTask.completed_at;
+          } else if (key in t && t[key] === fields[key]) {
+            t[key] = prevTask[key];
+          }
+        }
+        detail = { ...detail, task: t };
+        if ('name' in fields && name === fields.name) name = prevTask.name;
+        if ('description' in fields && description === fields.description) description = prevTask.description;
+      }
+      await load();
     }
   }
 
@@ -133,7 +191,7 @@
     e.preventDefault();
     if (!newComment.trim()) return;
     try {
-      await api.post(`/tasks/${id}/comments`, { body: newComment });
+      await api.post(`/tasks/${await resolveId(id)}/comments`, { body: newComment });
       newComment = '';
       await load();
     } catch (err) {
@@ -156,7 +214,7 @@
     const form = new FormData();
     form.append('file', file);
     try {
-      await api.post(`/tasks/${id}/attachments`, form);
+      await api.post(`/tasks/${await resolveId(id)}/attachments`, form);
       await load();
     } catch (err) {
       toast(err.message);
@@ -203,10 +261,13 @@
     class="flex w-full flex-col overflow-hidden bg-white sm:max-h-[85vh] sm:max-w-2xl sm:rounded-2xl sm:shadow-xl dark:bg-zinc-900"
   >
     {#if !detail}
-      <p class="p-8 text-center text-sm text-zinc-400">Loading…</p>
+      <p class="p-8 text-center text-sm text-zinc-400" style="padding-top: max(2rem, env(safe-area-inset-top))">Loading…</p>
     {:else}
-      <!-- header -->
-      <div class="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
+      <!-- header: on phones the dialog is full-screen, so keep the controls below the status bar / notch -->
+      <div
+        class="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800"
+        style="padding-top: max(0.75rem, env(safe-area-inset-top))"
+      >
         <span class="flex items-center gap-1 text-sm text-zinc-500">
           <Hash size={14} />
           {project?.is_inbox ? 'Inbox' : (project?.name ?? '…')}

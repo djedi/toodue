@@ -1,6 +1,6 @@
 <script>
   import { api } from '../api.js';
-  import { data, ui, projectById, navigate, toast } from '../state.svelte.js';
+  import { data, ui, bus, projectById, navigate, toast, isTaskDeleted } from '../state.svelte.js';
   import TaskList from '../components/TaskList.svelte';
   import TaskItem from '../components/TaskItem.svelte';
   import ProjectDialog from '../components/ProjectDialog.svelte';
@@ -17,19 +17,58 @@
   let showSettings = $state(false);
   let showCompleted = $state(false);
   let completedTasks = $state([]);
+  let completedGen = 0; // bumped on project change so stale responses are ignored
 
   $effect(() => {
     // Reset per-project UI state when navigating between projects.
     ui.projectId;
     showCompleted = false;
     completedTasks = [];
+    removedCompleted = new Map();
+    completedGen++;
+  });
+
+  // Completed rows removed optimistically, kept so a failed delete can put them back.
+  let removedCompleted = new Map();
+
+  $effect(() => {
+    const onDeleted = (e) => {
+      const id = e.detail.id;
+      const gone = completedTasks.filter((t) => t.id === id || t.parent_id === id);
+      if (gone.length) removedCompleted.set(id, gone);
+      completedTasks = completedTasks.filter((t) => t.id !== id && t.parent_id !== id);
+    };
+    const onDeleteFailed = (e) => {
+      const id = e.detail.id;
+      const gone = removedCompleted.get(id);
+      removedCompleted.delete(id);
+      if (!gone) return;
+      const present = new Set(completedTasks.map((t) => t.id));
+      completedTasks = [...completedTasks, ...gone.filter((t) => !present.has(t.id))];
+    };
+    bus.addEventListener('task-deleted', onDeleted);
+    bus.addEventListener('task-delete-failed', onDeleteFailed);
+    return () => {
+      bus.removeEventListener('task-deleted', onDeleted);
+      bus.removeEventListener('task-delete-failed', onDeleteFailed);
+    };
   });
 
   async function toggleCompleted() {
     showCompleted = !showCompleted;
     if (showCompleted) {
+      const gen = completedGen;
       try {
-        completedTasks = await api.get(`/tasks?project_id=${ui.projectId}&completed=true`);
+        const rows = await api.get(`/tasks?project_id=${ui.projectId}&completed=true`);
+        if (gen !== completedGen) return;
+        // Rows deleted while this request was in flight are held back, but kept for rollback.
+        for (const t of rows) {
+          const key = isTaskDeleted(t.id) ? t.id : isTaskDeleted(t.parent_id) ? t.parent_id : null;
+          if (key === null) continue;
+          const held = removedCompleted.get(key) ?? [];
+          if (!held.some((h) => h.id === t.id)) removedCompleted.set(key, [...held, t]);
+        }
+        completedTasks = rows.filter((t) => !isTaskDeleted(t.id) && !isTaskDeleted(t.parent_id));
       } catch (err) {
         toast(err.message);
       }
