@@ -1,8 +1,9 @@
 <script>
-  import { data, ui, updateTask, toast } from '../state.svelte.js';
+  import { data, ui, updateTask, toast, startSelection, endSelection, mutationSession, sessionValid } from '../state.svelte.js';
   import { todayStr, fullDayLabel } from '../dates.js';
   import TaskList from '../components/TaskList.svelte';
   import DatePicker from '../components/DatePicker.svelte';
+  import { mapLimit } from '../bulk.js';
   import { Plus, PartyPopper, ChevronDown } from '@lucide/svelte';
 
   let rescheduling = $state(false);
@@ -12,11 +13,14 @@
   // Move every overdue task to the picked day (or clear the date entirely).
   async function rescheduleOverdue(due_date) {
     const fields = due_date ? { due_date } : { due_date: null, due_time: null };
-    try {
-      await Promise.all(overdue.map((t) => updateTask(t.id, fields)));
-    } catch (err) {
-      toast(err.message);
-    }
+    const session = mutationSession();
+    const results = await mapLimit(overdue, 4, (t) => {
+      if (!sessionValid(session)) throw new Error('Signed out');
+      return updateTask(t.id, fields);
+    });
+    if (!sessionValid(session)) return;
+    const failed = results.find((r) => r.status === 'rejected');
+    if (failed) toast(failed.reason.message);
   }
   const overdue = $derived(
     data.tasks
@@ -30,9 +34,19 @@
   );
 </script>
 
-<header class="mb-4">
-  <h1 class="text-2xl font-bold tracking-tight">Today</h1>
-  <p class="mt-0.5 text-sm text-zinc-400">{fullDayLabel(today)}</p>
+<header class="mb-4 flex items-start justify-between gap-2">
+  <div>
+    <h1 class="text-2xl font-bold tracking-tight">Today</h1>
+    <p class="mt-0.5 text-sm text-zinc-400">{fullDayLabel(today)}</p>
+  </div>
+  {#if overdue.length || dueToday.length}
+    <button
+      onclick={() => (ui.selecting ? endSelection() : startSelection())}
+      class="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:text-zinc-300"
+    >
+      {ui.selecting ? 'Done' : 'Select'}
+    </button>
+  {/if}
 </header>
 
 {#if overdue.length}

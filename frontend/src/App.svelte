@@ -6,6 +6,7 @@
   import Toast from './lib/components/Toast.svelte';
   import QuickAdd from './lib/components/QuickAdd.svelte';
   import TaskModal from './lib/components/TaskModal.svelte';
+  import SelectionBar from './lib/components/SelectionBar.svelte';
   import Settings from './lib/components/Settings.svelte';
   import TodayView from './lib/views/Today.svelte';
   import UpcomingView from './lib/views/Upcoming.svelte';
@@ -171,6 +172,7 @@
   </div>
 
   <!-- Floating add button (mobile) -->
+  {#if !ui.selecting}
   <button
     aria-label="Add task"
     onclick={openQuickAdd}
@@ -178,8 +180,13 @@
   >
     <Plus size={28} />
   </button>
+  {/if}
 
-  <BottomNav />
+  {#if ui.selecting}
+    <SelectionBar />
+  {:else}
+    <BottomNav />
+  {/if}
 
   {#if ui.quickAdd}
     <QuickAdd />

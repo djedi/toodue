@@ -449,17 +449,27 @@ pub async fn create(
     Ok(Json(task))
 }
 
+/// Distinguish a field that was omitted (`None`, leave unchanged) from one sent as
+/// JSON `null` (`Some(None)`, clear it). Plain `Option<Option<T>>` maps both to `None`.
+fn nullable<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
 #[derive(Deserialize)]
 pub struct UpdateTask {
     pub name: Option<String>,
     pub description: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     pub due_date: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     pub due_time: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     pub deadline: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     pub repeat_rule: Option<Option<String>>,
     pub priority: Option<i64>,
     pub completed: Option<bool>,
@@ -820,5 +830,22 @@ mod tests {
             ),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod update_task_body_tests {
+    use super::UpdateTask;
+
+    #[test]
+    fn explicit_null_clears_and_omitted_leaves_alone() {
+        let b: UpdateTask = serde_json::from_str(r#"{"due_date":null,"due_time":null}"#).unwrap();
+        assert_eq!(b.due_date, Some(None));
+        assert_eq!(b.due_time, Some(None));
+        assert_eq!(b.deadline, None);
+
+        let b: UpdateTask = serde_json::from_str(r#"{"due_date":"2026-10-24"}"#).unwrap();
+        assert_eq!(b.due_date, Some(Some("2026-10-24".to_string())));
+        assert_eq!(b.due_time, None);
     }
 }

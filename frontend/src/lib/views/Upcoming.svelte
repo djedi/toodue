@@ -1,5 +1,5 @@
 <script>
-  import { data, ui } from '../state.svelte.js';
+  import { data, ui, startSelection, endSelection } from '../state.svelte.js';
   import { todayStr, fullDayLabel, dayLabel } from '../dates.js';
   import TaskList from '../components/TaskList.svelte';
   import { Plus } from '@lucide/svelte';
@@ -21,8 +21,16 @@
   }
 </script>
 
-<header class="mb-4">
+<header class="mb-4 flex items-center justify-between gap-2">
   <h1 class="text-2xl font-bold tracking-tight">Upcoming</h1>
+  {#if days.length}
+    <button
+      onclick={() => (ui.selecting ? endSelection() : startSelection())}
+      class="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:text-zinc-300"
+    >
+      {ui.selecting ? 'Done' : 'Select'}
+    </button>
+  {/if}
 </header>
 
 {#each days as day (day)}

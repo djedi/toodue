@@ -1,6 +1,6 @@
 <script>
   import { api } from '../api.js';
-  import { data, ui, bus, projectById, navigate, toast, isTaskDeleted } from '../state.svelte.js';
+  import { data, ui, bus, projectById, navigate, toast, isTaskDeleted, startSelection, endSelection } from '../state.svelte.js';
   import TaskList from '../components/TaskList.svelte';
   import TaskItem from '../components/TaskItem.svelte';
   import ProjectDialog from '../components/ProjectDialog.svelte';
@@ -30,9 +30,18 @@
 
   // Completed rows removed optimistically, kept so a failed delete can put them back.
   let removedCompleted = new Map();
+  let loadingCompleted = false;
+
+  // A mutation landed while the completed list was loading: that response is now stale, fetch again.
+  function invalidateCompletedLoad() {
+    if (!loadingCompleted) return;
+    completedGen++;
+    loadCompleted();
+  }
 
   $effect(() => {
     const onDeleted = (e) => {
+      invalidateCompletedLoad();
       const id = e.detail.id;
       const gone = completedTasks.filter((t) => t.id === id || t.parent_id === id);
       if (gone.length) removedCompleted.set(id, gone);
@@ -46,33 +55,53 @@
       const present = new Set(completedTasks.map((t) => t.id));
       completedTasks = [...completedTasks, ...gone.filter((t) => !present.has(t.id))];
     };
+    // Confirmed edits reach completed rows too: moved or reopened tasks leave the list, others refresh.
+    const onUpdated = (e) => {
+      invalidateCompletedLoad();
+      const t = e.detail;
+      if (t.project_id !== ui.projectId) {
+        // Moved away: the server moves its subtasks with it.
+        completedTasks = completedTasks.filter((x) => x.id !== t.id && x.parent_id !== t.id);
+        return;
+      }
+      if (!completedTasks.some((x) => x.id === t.id)) return;
+      if (!t.completed_at) completedTasks = completedTasks.filter((x) => x.id !== t.id);
+      else completedTasks = completedTasks.map((x) => (x.id === t.id ? t : x));
+    };
     bus.addEventListener('task-deleted', onDeleted);
     bus.addEventListener('task-delete-failed', onDeleteFailed);
+    bus.addEventListener('task-updated', onUpdated);
     return () => {
       bus.removeEventListener('task-deleted', onDeleted);
       bus.removeEventListener('task-delete-failed', onDeleteFailed);
+      bus.removeEventListener('task-updated', onUpdated);
     };
   });
 
+  async function loadCompleted() {
+    const gen = completedGen;
+    loadingCompleted = true;
+    try {
+      const rows = await api.get(`/tasks?project_id=${ui.projectId}&completed=true`);
+      if (gen !== completedGen) return;
+      // Rows deleted while this request was in flight are held back, but kept for rollback.
+      for (const t of rows) {
+        const key = isTaskDeleted(t.id) ? t.id : isTaskDeleted(t.parent_id) ? t.parent_id : null;
+        if (key === null) continue;
+        const held = removedCompleted.get(key) ?? [];
+        if (!held.some((h) => h.id === t.id)) removedCompleted.set(key, [...held, t]);
+      }
+      completedTasks = rows.filter((t) => !isTaskDeleted(t.id) && !isTaskDeleted(t.parent_id));
+    } catch (err) {
+      if (gen === completedGen) toast(err.message);
+    } finally {
+      if (gen === completedGen) loadingCompleted = false;
+    }
+  }
+
   async function toggleCompleted() {
     showCompleted = !showCompleted;
-    if (showCompleted) {
-      const gen = completedGen;
-      try {
-        const rows = await api.get(`/tasks?project_id=${ui.projectId}&completed=true`);
-        if (gen !== completedGen) return;
-        // Rows deleted while this request was in flight are held back, but kept for rollback.
-        for (const t of rows) {
-          const key = isTaskDeleted(t.id) ? t.id : isTaskDeleted(t.parent_id) ? t.parent_id : null;
-          if (key === null) continue;
-          const held = removedCompleted.get(key) ?? [];
-          if (!held.some((h) => h.id === t.id)) removedCompleted.set(key, [...held, t]);
-        }
-        completedTasks = rows.filter((t) => !isTaskDeleted(t.id) && !isTaskDeleted(t.parent_id));
-      } catch (err) {
-        toast(err.message);
-      }
-    }
+    if (showCompleted) await loadCompleted();
   }
 </script>
 
@@ -85,6 +114,12 @@
       <h1 class="min-w-0 flex-1 truncate text-2xl font-bold tracking-tight">
         {project.is_inbox ? 'Inbox' : project.name}
       </h1>
+      <button
+      onclick={() => (ui.selecting ? endSelection() : startSelection())}
+      class="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:text-zinc-300"
+    >
+      {ui.selecting ? 'Done' : 'Select'}
+    </button>
       {#if !project.is_inbox}
         <button
           aria-label="Project settings"

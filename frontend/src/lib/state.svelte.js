@@ -32,6 +32,10 @@ export const ui = $state({
   projectId: null,
   openTaskId: null,
   swipedTaskId: null, // task row whose swipe-to-delete action is revealed (mobile)
+  selecting: false, // multi-select mode for task rows
+  selectedIds: [], // ids of selected tasks while selecting
+  selectedParents: {}, // id -> parent_id for selected tasks (bulk delete skips children of selected parents)
+  selectionGen: 0, // bumped whenever selection starts/ends so stale bulk operations don't touch it
   quickAdd: null, // null or { project_id?, due_date?, parent_id? }
   showSettings: false,
   toast: null,
@@ -148,6 +152,7 @@ export function navigate(view, projectId = null) {
 
 export function syncRoute() {
   ui.swipedTaskId = null;
+  endSelection();
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   if (parts[0] === 'project' && parts[1]) {
     ui.view = 'project';
@@ -163,6 +168,45 @@ export function syncRoute() {
     ui.view = 'today';
     ui.projectId = null;
   }
+}
+
+/* ---------- multi-select ---------- */
+
+export function startSelection(task = null) {
+  if (data.syncPending) return; // ids are being swapped for real ones; selecting now would go stale
+  ui.swipedTaskId = null;
+  if (!ui.selecting) ui.selectionGen++;
+  ui.selecting = true;
+  if (task && !ui.selectedIds.includes(task.id)) {
+    ui.selectedIds = [...ui.selectedIds, task.id];
+    ui.selectedParents[task.id] = task.parent_id ?? null;
+  }
+}
+
+export function toggleSelected(task) {
+  if (data.syncPending) return;
+  if (ui.selectedIds.includes(task.id)) {
+    ui.selectedIds = ui.selectedIds.filter((x) => x !== task.id);
+    delete ui.selectedParents[task.id];
+  } else {
+    ui.selectedIds = [...ui.selectedIds, task.id];
+    ui.selectedParents[task.id] = task.parent_id ?? null;
+  }
+}
+
+export function endSelection() {
+  if (ui.selecting) ui.selectionGen++;
+  ui.selecting = false;
+  ui.selectedIds = [];
+  ui.selectedParents = {};
+}
+
+// Drop ids that no longer exist (deleted here or elsewhere) from the selection.
+function unselect(ids) {
+  if (!ui.selectedIds.length) return;
+  const gone = new Set(ids);
+  ui.selectedIds = ui.selectedIds.filter((x) => !gone.has(x));
+  for (const id of gone) delete ui.selectedParents[id];
 }
 
 /* ---------- data loading ---------- */
@@ -309,6 +353,11 @@ function handleEvent({ type, data: d }) {
       }
       deletedTaskIds.add(d.id);
       taskEdits.delete(d.id);
+      unselect([
+        d.id,
+        ...data.tasks.filter((t) => t.parent_id === d.id).map((t) => t.id),
+        ...ui.selectedIds.filter((x) => ui.selectedParents[x] === d.id)
+      ]);
       data.tasks = data.tasks.filter((t) => t.id !== d.id && t.parent_id !== d.id);
       if (ui.openTaskId === d.id) ui.openTaskId = null;
       break;
@@ -334,6 +383,7 @@ function handleEvent({ type, data: d }) {
           taskEdits.delete(tid);
         }
       }
+      unselect(data.tasks.filter((t) => t.project_id === d.id).map((t) => t.id));
       data.tasks = data.tasks.filter((t) => t.project_id !== d.id);
       if (ui.view === 'project' && ui.projectId === d.id) navigate('projects');
       break;
@@ -361,7 +411,9 @@ export async function syncOfflineQueue() {
   }
   data.syncPending = true;
   try {
+    if (hasQueuedOperations()) endSelection(); // replay swaps temp ids for real ones; a selection can't follow
     const result = await replayQueuedOperations({ request, refresh });
+    if (result.replayed) endSelection();
     data.offline = false;
     connectSSE();
     if (result.replayed) toast('Offline changes synced.');
@@ -414,6 +466,7 @@ let sessionGen = 0;
 
 function resetMutationState() {
   sessionGen++;
+  endSelection();
   pendingCreates.clear();
   createdIds.clear();
   deletedTaskIds.clear();
@@ -435,14 +488,42 @@ function reconcileTask(t) {
   }
 }
 
-function projectTask(id) {
+// Whether a mutation started under the current sign-in may still proceed.
+export function mutationSession() {
+  return sessionGen;
+}
+
+export function sessionValid(token) {
+  return token === sessionGen;
+}
+
+// Confirmed state plus pending edits, without touching the list.
+function projectedTask(id) {
   const edit = taskEdits.get(id);
-  if (!edit) return;
+  if (!edit) return null;
   let t = edit.base;
   for (const op of edit.pending) t = applyLocalTaskPatch(t, op.fields);
+  // A subtask's project is its parent's; follow the parent's projected (or already applied) move.
+  if (t.parent_id != null) {
+    const parent = projectedTask(t.parent_id) ?? data.tasks.find((x) => x.id === t.parent_id);
+    if (parent && parent.project_id !== t.project_id) t = { ...t, project_id: parent.project_id };
+  }
+  return t;
+}
+
+function projectTask(id) {
+  const t = projectedTask(id);
+  if (!t) return;
   if (deletedTaskIds.has(id)) return;
   if (t.completed_at) data.tasks = data.tasks.filter((x) => x.id !== id);
   else upsert(data.tasks, t);
+  // Subtasks live in their parent's project; follow a (pending or confirmed) move locally so they
+  // don't vanish from both project lists. Re-projection after a failure moves them back.
+  for (const child of data.tasks) {
+    if (child.parent_id !== id || child.project_id === t.project_id) continue;
+    if (taskEdits.has(child.id)) projectTask(child.id); // its own projection picks up the parent's project
+    else child.project_id = t.project_id;
+  }
 }
 
 export async function addTask(fields) {
@@ -468,6 +549,14 @@ export async function addTask(fields) {
     if (gone) deletedTaskIds.add(t.id);
     else upsert(data.tasks, t);
     if (ui.openTaskId === temp.id) ui.openTaskId = t.id;
+    if (ui.selectedIds.includes(temp.id)) {
+      const parent = ui.selectedParents[temp.id];
+      unselect([temp.id]);
+      if (!ui.selectedIds.includes(t.id)) {
+        ui.selectedIds = [...ui.selectedIds, t.id];
+        ui.selectedParents[t.id] = parent ?? t.parent_id ?? null;
+      }
+    }
     createdIds.set(temp.id, t.id);
     saveCurrentSnapshot();
     settle(t);
@@ -479,6 +568,7 @@ export async function addTask(fields) {
     }
     if (!mutationOffline(err)) {
       data.tasks = data.tasks.filter((x) => x.id !== temp.id);
+      unselect([temp.id]);
       saveCurrentSnapshot();
       settle(null);
       throw err;
@@ -510,6 +600,7 @@ export async function updateTask(id, fields) {
     if (gen !== sessionGen) return t;
     reconcileTask(t);
     saveCurrentSnapshot();
+    bus.dispatchEvent(new CustomEvent('task-updated', { detail: t }));
     return t;
   }
 
@@ -536,6 +627,7 @@ export async function updateTask(id, fields) {
       if (gen !== sessionGen) return t;
       edit.base = t;
       settle();
+      bus.dispatchEvent(new CustomEvent('task-updated', { detail: t }));
       if (fields.completed === true && (existing.repeat_rule || t.repeat_rule)) {
         await refreshTasks();
       }
@@ -584,6 +676,13 @@ export async function deleteTask(id) {
   data.tasks = data.tasks.filter((t) => t.id !== id && t.parent_id !== id);
   if (ui.openTaskId === id) ui.openTaskId = null;
   if (ui.swipedTaskId === id) ui.swipedTaskId = null;
+  // Everything this delete takes with it, including selected completed children only the selection knows about.
+  const selectedChildren = ui.selectedIds.filter((x) => ui.selectedParents[x] === id);
+  const removedIds = [...new Set([id, ...removed.map((t) => t.id), ...selectedChildren])];
+  const selGen = ui.selectionGen;
+  const wasSelected = ui.selecting ? removedIds.filter((x) => ui.selectedIds.includes(x)) : [];
+  const selectedParents = Object.fromEntries(wasSelected.map((x) => [x, ui.selectedParents[x]]));
+  unselect(removedIds);
   // Views holding their own task lists (e.g. a project's completed tasks) drop the row here.
   bus.dispatchEvent(new CustomEvent('task-deleted', { detail: { id } }));
   try {
@@ -609,6 +708,11 @@ export async function deleteTask(id) {
       for (const tid of ids) {
         const e = taskEdits.get(tid);
         if (e && !e.pending.length) taskEdits.delete(tid);
+      }
+      if (wasSelected.length && ui.selecting && ui.selectionGen === selGen) {
+        const back = wasSelected.filter((x) => !ui.selectedIds.includes(x));
+        ui.selectedIds = [...ui.selectedIds, ...back];
+        for (const x of back) ui.selectedParents[x] = selectedParents[x] ?? null;
       }
       saveCurrentSnapshot();
       bus.dispatchEvent(new CustomEvent('task-delete-failed', { detail: { id } }));

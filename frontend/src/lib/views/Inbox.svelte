@@ -1,5 +1,5 @@
 <script>
-  import { data, ui, inboxProject } from '../state.svelte.js';
+  import { data, ui, inboxProject, startSelection, endSelection } from '../state.svelte.js';
   import TaskList from '../components/TaskList.svelte';
   import { Plus, Inbox } from '@lucide/svelte';
 
@@ -11,8 +11,16 @@
   );
 </script>
 
-<header class="mb-4">
+<header class="mb-4 flex items-center justify-between gap-2">
   <h1 class="text-2xl font-bold tracking-tight">Inbox</h1>
+  {#if tasks.length}
+    <button
+      onclick={() => (ui.selecting ? endSelection() : startSelection())}
+      class="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:text-zinc-300"
+    >
+      {ui.selecting ? 'Done' : 'Select'}
+    </button>
+  {/if}
 </header>
 
 {#if tasks.length}

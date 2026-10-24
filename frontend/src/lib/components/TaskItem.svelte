@@ -1,5 +1,5 @@
 <script>
-  import { ui, completeTask, deleteTask, projectById, toast } from '../state.svelte.js';
+  import { ui, completeTask, deleteTask, projectById, toast, startSelection, toggleSelected } from '../state.svelte.js';
   import { dayLabel, fmtTime, isOverdue, todayStr } from '../dates.js';
   import { repeatLabel } from '../recurrence.js';
   import { untrack } from 'svelte';
@@ -50,6 +50,40 @@
   const revealed = $derived(ui.swipedTaskId === task.id);
   let start = null; // { x, y, offset, axis: null | 'x' | 'y' }
 
+  /* ---------- multi-select ---------- */
+  const selected = $derived(ui.selecting && ui.selectedIds.includes(task.id));
+  let holdTimer = null;
+  let suppressClick = false; // a long-press that started selection shouldn't also open the task
+  let mounted = true;
+  let holdOrigin = null; // where the finger went down, to cancel the hold once it moves
+
+  function cancelHold() {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+  }
+
+  function beginHold() {
+    cancelHold();
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      if (!mounted || ui.selecting) return; // row vanished or something else started selecting
+      suppressClick = true;
+      // The same finger must not continue as a swipe once we're selecting.
+      start = null;
+      dragging = false;
+      offset = 0;
+      startSelection(task);
+      navigator.vibrate?.(10);
+    }, 450);
+  }
+
+  $effect(() => {
+    return () => {
+      mounted = false;
+      cancelHold();
+    };
+  });
+
   // Keep the row position in sync with the shared "revealed" state (e.g. another row was swiped open).
   $effect(() => {
     if (dragging) return;
@@ -73,19 +107,29 @@
   });
 
   function onTouchStart(e) {
+    if (e.touches.length !== 1) return;
+    holdOrigin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (!ui.selecting) beginHold(); // long-press enters multi-select
     // The delete action is only rendered below the md breakpoint; don't let wider touch screens swipe.
-    if (e.touches.length !== 1 || !matchMedia('(max-width: 767px)').matches) return;
+    if (ui.selecting || !matchMedia('(max-width: 767px)').matches) return;
     const t = e.touches[0];
     start = { x: t.clientX, y: t.clientY, offset: revealed ? -ACTION_W : 0, axis: null };
   }
 
   function onTouchMove(e) {
-    if (!start || e.touches.length !== 1) return;
+    if (e.touches.length !== 1) return;
+    if (holdTimer && holdOrigin) {
+      const hx = e.touches[0].clientX - holdOrigin.x;
+      const hy = e.touches[0].clientY - holdOrigin.y;
+      if (Math.abs(hx) >= 8 || Math.abs(hy) >= 8) cancelHold();
+    }
+    if (!start || ui.selecting) return;
     const t = e.touches[0];
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
     if (!start.axis) {
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      cancelHold(); // moved: it's a swipe or a scroll, not a long-press
       start.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
       if (start.axis === 'x') dragging = true;
     }
@@ -95,7 +139,13 @@
   }
 
   function onTouchEnd() {
+    cancelHold();
     if (!start) return;
+    if (ui.selecting) {
+      start = null;
+      dragging = false;
+      return;
+    }
     const wasDragging = start.axis === 'x';
     start = null;
     if (!wasDragging) return;
@@ -117,7 +167,19 @@
     };
   });
 
-  function open() {
+  function open(e) {
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
+    if (ui.selecting) {
+      toggleSelected(task);
+      return;
+    }
+    if (e && (e.metaKey || e.ctrlKey)) {
+      startSelection(task);
+      return;
+    }
     // A tap while a row is swiped open just closes the action instead of opening a task.
     if (ui.swipedTaskId !== null) {
       ui.swipedTaskId = null;
@@ -168,21 +230,36 @@
     role="button"
     tabindex="0"
     onclick={open}
-    onkeydown={(e) => e.key === 'Enter' && (ui.openTaskId = task.id)}
+    onkeydown={(e) => e.target === e.currentTarget && (e.key === 'Enter' || (ui.selecting && e.key === ' ')) && (e.preventDefault(), open(e))}
+    oncontextmenu={(e) => holdTimer && e.preventDefault()}
+    aria-pressed={ui.selecting ? selected : undefined}
     ontouchstart={onTouchStart}
     ontouchmove={onTouchMove}
     ontouchend={onTouchEnd}
     ontouchcancel={onTouchEnd}
-    style="transform: translateX({offset}px); transition: {dragging ? 'none' : 'transform 180ms ease'}; touch-action: pan-y pinch-zoom"
-    class="group relative flex w-full cursor-pointer gap-3 border-b border-zinc-100 bg-white px-1 py-2.5 text-left dark:border-zinc-800/70 dark:bg-zinc-950"
+    style="transform: translateX({offset}px); transition: {dragging ? 'none' : 'transform 180ms ease'}; touch-action: pan-y pinch-zoom; -webkit-touch-callout: none; -webkit-user-select: none"
+    class="group relative flex w-full cursor-pointer gap-3 border-b border-zinc-100 px-1 py-2.5 text-left dark:border-zinc-800/70 {selected
+      ? 'bg-brand-50 dark:bg-brand-950/40'
+      : 'bg-white dark:bg-zinc-950'}"
   >
-    <button aria-label={done ? 'Mark incomplete' : 'Complete task'} onclick={toggle} class="task-check {checkColors[task.priority]} {done ? 'bg-current/10' : ''}">
-      {#if done}
-        <Check size={13} strokeWidth={3} />
-      {:else}
-        <span class="opacity-0 transition group-hover:opacity-60"><Check size={13} strokeWidth={3} /></span>
-      {/if}
-    </button>
+    {#if ui.selecting}
+      <span
+        aria-hidden="true"
+        class="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full border-2 transition {selected
+          ? 'border-brand-600 bg-brand-600 text-white'
+          : 'border-zinc-300 dark:border-zinc-600'}"
+      >
+        {#if selected}<Check size={13} strokeWidth={3} />{/if}
+      </span>
+    {:else}
+      <button aria-label={done ? 'Mark incomplete' : 'Complete task'} onclick={toggle} class="task-check {checkColors[task.priority]} {done ? 'bg-current/10' : ''}">
+        {#if done}
+          <Check size={13} strokeWidth={3} />
+        {:else}
+          <span class="opacity-0 transition group-hover:opacity-60"><Check size={13} strokeWidth={3} /></span>
+        {/if}
+      </button>
+    {/if}
 
     <div class="min-w-0 flex-1">
       <div class="text-sm leading-snug {done ? 'text-zinc-400 line-through' : ''}">
