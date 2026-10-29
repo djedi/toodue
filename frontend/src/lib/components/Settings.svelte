@@ -3,7 +3,7 @@
   import { apiKeyCreatedMessage, maskApiKey } from '../apiKeys.js';
   import { summarizeScope } from '../oauth.js';
   import { API_BASE, apiUrl, openApiLink } from '../native.js';
-  import { data, ui, refresh, signOut, toast } from '../state.svelte.js';
+  import { data, ui, refresh, signOut, deleteAccount, toast } from '../state.svelte.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import ColorSchemePicker from './ColorSchemePicker.svelte';
   import {
@@ -153,6 +153,24 @@
       toast('Calendar feed URL copied — subscribe to it in Google Calendar or Fantastical');
     } catch (err) {
       toast(err.message);
+    }
+  }
+
+  let deleting = $state(false);
+  let deletePassword = $state('');
+  let deleteBusy = $state(false);
+
+  async function confirmDeleteAccount(e) {
+    e.preventDefault();
+    if (!deletePassword || deleteBusy) return;
+    deleteBusy = true;
+    try {
+      await deleteAccount(deletePassword);
+      toast('Your account and all of its data have been deleted');
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      deleteBusy = false;
     }
   }
 
@@ -393,6 +411,35 @@
       >
         <LogOut size={18} /> Log out
       </button>
+
+      {#if deleting}
+        <form onsubmit={confirmDeleteAccount} class="rounded-xl border border-red-300 p-4 dark:border-red-900">
+          <h3 class="text-sm font-semibold text-red-600 dark:text-red-400">Delete account</h3>
+          <p class="mt-1 text-xs text-zinc-500">
+            This permanently deletes your account, your projects, tasks, comments and attachments. Tasks you added to
+            projects shared with you stay with their owners. This can't be undone.
+          </p>
+          <input
+            type="password"
+            bind:value={deletePassword}
+            autocomplete="current-password"
+            placeholder="Enter your password to confirm"
+            class="mt-3 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-red-500 dark:border-zinc-700"
+          />
+          <div class="mt-3 flex gap-2">
+            <button type="button" onclick={() => ((deleting = false), (deletePassword = ''))} class="flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">
+              Cancel
+            </button>
+            <button type="submit" disabled={!deletePassword || deleteBusy} class="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">
+              {deleteBusy ? 'Deleting…' : 'Delete forever'}
+            </button>
+          </div>
+        </form>
+      {:else}
+        <button onclick={() => (deleting = true)} class="{row} text-sm text-zinc-500">
+          <Trash2 size={18} /> Delete account
+        </button>
+      {/if}
     </div>
   </div>
 </div>

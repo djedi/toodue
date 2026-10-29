@@ -1,5 +1,11 @@
 apply plugin: 'com.android.application'
 
+// Release signing comes from env vars (fastlane/.env); never commit the keystore.
+def env = System.getenv()
+def uploadStore = env['TOODUE_UPLOAD_STORE_FILE']
+def hasUploadKey = uploadStore && file(uploadStore.replaceFirst('^~', System.getProperty('user.home'))).exists()
+def npmVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
+
 android {
     namespace = "com.redseam.toodue"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +13,8 @@ android {
         applicationId "com.toodue.toodue"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.1"
+        versionCode((project.findProperty('toodueVersionCode') ?: '1') as Integer)
+        versionName(project.findProperty('toodueVersionName') ?: npmVersion)
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +22,19 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasUploadKey) {
+            release {
+                storeFile file(uploadStore.replaceFirst('^~', System.getProperty('user.home')))
+                storePassword env['TOODUE_UPLOAD_STORE_PASSWORD']
+                keyAlias env['TOODUE_UPLOAD_KEY_ALIAS']
+                keyPassword env['TOODUE_UPLOAD_KEY_PASSWORD']
+            }
+        }
+    }
     buildTypes {
         release {
+            if (hasUploadKey) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

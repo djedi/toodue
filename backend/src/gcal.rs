@@ -244,6 +244,11 @@ pub async fn callback(
     Ok(Redirect::temporary("/"))
 }
 
+/// Best-effort Google cleanup before an account is deleted.
+pub(crate) async fn teardown_for_user(st: &AppState, user_id: i64) {
+    let _ = teardown(st, user_id).await;
+}
+
 /// Best-effort removal of the user's channel and TooDue calendar at Google.
 async fn teardown(st: &AppState, user_id: i64) -> GRes<()> {
     let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(&*crate::db::sql(

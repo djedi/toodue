@@ -123,6 +123,27 @@ To test against a local plain-http backend, put `VITE_API_BASE=http://localhost:
 `.env.native.local` and sync with `CAP_DEV_HTTP=1` (on Android also run
 `adb reverse tcp:8080 tcp:8080`).
 
+### Releasing to the App Store and Google Play
+
+Releases go through fastlane in `frontend/fastlane`. Copy `fastlane/.env.example` to
+`fastlane/.env` (gitignored) and fill in the App Store Connect API key, the Play
+service-account key, and the Android upload keystore (`scripts/create-android-upload-key.sh`
+creates one and writes its settings). The marketing version comes from `package.json`;
+build numbers and version codes are bumped automatically from the stores.
+
+| Command (from `frontend/`)       | What it does                                              |
+| -------------------------------- | --------------------------------------------------------- |
+| `fastlane ios beta`              | Build and upload to TestFlight                            |
+| `fastlane ios metadata`          | Push `fastlane/metadata` text/screenshots, no submit      |
+| `fastlane ios release`           | Build, upload, push metadata, submit for App Review       |
+| `fastlane android build`         | Build a signed release AAB locally                        |
+| `fastlane android internal`      | Upload the AAB to the Play internal testing track         |
+| `fastlane android metadata`      | Push the Play listing from `fastlane/metadata/android`    |
+| `fastlane android promote`       | Promote internal to production (`ROLLOUT=0.2` to stage)   |
+
+Store review requires in-app account deletion (Settings → Delete account,
+`DELETE /api/auth/me`) and the privacy/support pages at toodue.com.
+
 Native clients can't use the session cookie cross-origin, so sign-in returns a session
 token (when the request sends `X-TooDue-Client: native`) that is sent as a bearer header.
 The server allows CORS from the Capacitor origins (`capacitor://localhost`, `https://localhost`).

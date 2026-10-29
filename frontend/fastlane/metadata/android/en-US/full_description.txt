@@ -1,0 +1,13 @@
+TooDue is a fast, offline-first task manager built for getting things done without friction.
+
+• Today and Inbox views so you always know what's due
+• Projects, priorities, and due dates that stay organized
+• Repeating tasks for routines that stick
+• Real-time sync across your devices
+• Share projects and collaborate by email
+• Two-way Google Calendar sync
+• Clean, native interface that stays out of your way
+
+Whether you are planning your day or clearing a backlog, TooDue keeps tasks simple, fast, and reliable.
+
+Learn more at https://toodue.com
