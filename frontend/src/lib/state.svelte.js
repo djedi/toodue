@@ -849,10 +849,20 @@ export async function removeMember(projectId, userId) {
   saveCurrentSnapshot();
 }
 
+export async function deleteAccount(password) {
+  if (!requireOnlineAction()) throw new Error('Connection required');
+  await request('DELETE', '/auth/me', { password });
+  clearLocalSession();
+}
+
 export async function signOut() {
   try {
     await api.post('/auth/logout');
   } catch {}
+  clearLocalSession();
+}
+
+function clearLocalSession() {
   setSessionToken(null);
   disconnectSSE();
   clearOfflineState();

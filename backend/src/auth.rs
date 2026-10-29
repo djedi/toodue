@@ -408,9 +408,154 @@ pub async fn me(AuthUser(user): AuthUser) -> Json<User> {
     Json(user)
 }
 
+#[derive(Deserialize)]
+pub struct DeleteAccountBody {
+    pub password: String,
+}
+
+/// Permanently deletes the signed-in account (App Store guideline 5.1.1(v)).
+/// The password is re-checked so a stolen session can't wipe an account.
+pub async fn delete_account(
+    State(st): State<AppState>,
+    AuthUser(user): AuthUser,
+    Json(b): Json<DeleteAccountBody>,
+) -> ApiResult<AppendHeaders<[(HeaderName, String); 1]>> {
+    let (hash,): (String,) = sqlx::query_as(&*crate::db::sql(
+        "SELECT password_hash FROM users WHERE id = ?",
+    ))
+    .bind(user.id)
+    .fetch_one(&st.db.pool)
+    .await?;
+    let parsed =
+        PasswordHash::new(&hash).map_err(|_| ApiError::internal("corrupt password hash"))?;
+    Argon2::default()
+        .verify_password(b.password.as_bytes(), &parsed)
+        .map_err(|_| ApiError::bad_request("incorrect password"))?;
+
+    crate::gcal::teardown_for_user(&st, user.id).await;
+    let files = delete_user_data(&st.db.pool, user.id).await?;
+    let dir = st.data_dir.join("attachments");
+    for name in files {
+        let _ = tokio::fs::remove_file(dir.join(name)).await;
+    }
+    tracing::info!("deleted account {}", user.id);
+    let cookie = format!("{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+    Ok(AppendHeaders([(header::SET_COOKIE, cookie)]))
+}
+
+/// Removes a user and everything they own in one transaction. Tasks they
+/// created in other people's projects stay with those projects, reassigned to
+/// the project owner. Returns attachment file names to unlink afterwards.
+pub(crate) async fn delete_user_data(
+    pool: &sqlx::AnyPool,
+    user_id: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let files: Vec<(String,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT a.stored_name FROM attachments a JOIN tasks t ON t.id = a.task_id \
+         JOIN projects p ON p.id = t.project_id \
+         WHERE a.user_id = ? OR p.owner_id = ?",
+    ))
+    .bind(user_id)
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    sqlx::query(&*crate::db::sql(
+        "UPDATE tasks SET creator_id = (SELECT p.owner_id FROM projects p WHERE p.id = tasks.project_id) \
+         WHERE creator_id = ? AND project_id IN (SELECT id FROM projects WHERE owner_id <> ?)",
+    ))
+    .bind(user_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(&*crate::db::sql("DELETE FROM projects WHERE owner_id = ?"))
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(&*crate::db::sql("DELETE FROM users WHERE id = ?"))
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(files.into_iter().map(|r| r.0).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::link_path_allowed;
+
+    #[tokio::test]
+    async fn delete_user_data_removes_owned_data_and_keeps_shared_tasks() {
+        use sqlx::any::{AnyConnectOptions, AnyPoolOptions};
+        sqlx::any::install_default_drivers();
+        let path = std::env::temp_dir().join(format!(
+            "toodue-delete-account-{}-{}.db",
+            std::process::id(),
+            super::random_token()
+        ));
+        let opts: AnyConnectOptions = format!("sqlite://{}?mode=rwc", path.display())
+            .parse()
+            .unwrap();
+        let pool = AnyPoolOptions::new()
+            .max_connections(1)
+            .after_connect(|c, _| {
+                Box::pin(async move {
+                    sqlx::query("PRAGMA foreign_keys = ON").execute(c).await?;
+                    Ok(())
+                })
+            })
+            .connect_with(opts)
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!("schema.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO users (id, email, name, password_hash, ics_token) VALUES \
+               (1, 'gone@x.com', 'Gone', 'h', 't1'), (2, 'stay@x.com', 'Stay', 'h', 't2');
+             INSERT INTO projects (id, name, owner_id) VALUES (10, 'Mine', 1), (20, 'Theirs', 2);
+             INSERT INTO project_members (project_id, user_id) VALUES (10, 1), (20, 2), (20, 1);
+             INSERT INTO tasks (id, project_id, creator_id, name) VALUES \
+               (100, 10, 1, 'mine'), (200, 20, 1, 'mine in theirs'), (201, 20, 2, 'theirs');
+             INSERT INTO attachments (task_id, user_id, filename, stored_name, mime, size) VALUES \
+               (100, 1, 'a', 'own-file', 'text/plain', 1), (201, 2, 'b', 'their-file', 'text/plain', 1);
+             INSERT INTO sessions (token, user_id, expires_at) VALUES ('s', 1, 'x');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let files = super::delete_user_data(&pool, 1).await.unwrap();
+        assert_eq!(files, ["own-file"]);
+
+        let count = |q: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(q)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(count("SELECT COUNT(*) FROM users WHERE id = 1").await, 0);
+        assert_eq!(count("SELECT COUNT(*) FROM sessions").await, 0);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM projects WHERE id = 10").await,
+            0
+        );
+        assert_eq!(count("SELECT COUNT(*) FROM tasks WHERE id = 100").await, 0);
+        assert_eq!(
+            count("SELECT creator_id FROM tasks WHERE id = 200").await,
+            2
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM project_members WHERE user_id = 1").await,
+            0
+        );
+        assert_eq!(count("SELECT COUNT(*) FROM attachments").await, 1);
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn link_paths_are_restricted() {

@@ -1,0 +1,5 @@
+TooDue is an offline-first task manager. Reviewers can tap Sign up on the welcome screen to create a free account; no demo account is needed. Core flows: Today tab, Inbox tab, add task, complete task, projects, repeating tasks.
+
+Account deletion (Guideline 5.1.1(v)): Settings (gear icon) > Delete account, enter the account password, then tap Delete forever. The account and all of its data are deleted immediately.
+
+No in-app purchases, ads or tracking. Support: https://toodue.com/support/ Privacy: https://toodue.com/privacy/

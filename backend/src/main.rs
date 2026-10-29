@@ -81,7 +81,7 @@ async fn main() {
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
-        .route("/auth/me", get(auth::me))
+        .route("/auth/me", get(auth::me).delete(auth::delete_account))
         .route("/auth/link-token", post(auth::link_token))
         .route("/me", get(auth::me))
         .route(
