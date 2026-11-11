@@ -1079,7 +1079,6 @@ pub async fn remove(
 ) -> ApiResult<Json<Value>> {
     let task = fetch_task(&st.db.pool, id).await?;
     require_member(&st.db.pool, user.id, task.project_id).await?;
-    let recipients = project_recipients(&st.db.pool, task.project_id).await;
     // Same discipline as the purge: lock, collect the subtree's files, delete, then clean up
     // after commit, so no upload can slip a file in between.
     let mut tx = st.db.pool.begin().await?;
@@ -1091,8 +1090,19 @@ pub async fn remove(
             .await?;
     }
     let subtree = collect_subtree(&mut tx, postgres, &[id]).await?;
+    // Re-check under the lock: the task may have moved projects since the check above.
+    let locked: Option<(i64,)> =
+        sqlx::query_as(&*crate::db::sql("SELECT project_id FROM tasks WHERE id = ?"))
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((root_project,)) = locked else {
+        return Err(ApiError::not_found());
+    };
     let allowed = member_projects(&mut tx, user.id).await?;
-    if !roots_reaching_foreign_projects(&subtree.descendants, &allowed).is_empty() {
+    if !allowed.contains(&root_project)
+        || !roots_reaching_foreign_projects(&subtree.descendants, &allowed).is_empty()
+    {
         return Err(ApiError::forbidden());
     }
     sqlx::query(&*crate::db::sql("DELETE FROM tasks WHERE id = ?"))
@@ -1100,9 +1110,20 @@ pub async fn remove(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    let recipients = project_recipients(&st.db.pool, root_project).await;
     spawn_attachment_cleanup(&st, subtree.files.into_iter().map(|(name, _)| name).collect());
     st.hub
         .publish(recipients, "task.remove", json!({ "id": id }));
+    // Cascade-deleted subtasks can live in other projects; tell those members too.
+    let mut others: std::collections::BTreeMap<i64, Vec<i64>> = Default::default();
+    for (sid, _, pid) in &subtree.descendants {
+        others.entry(*pid).or_default().push(*sid);
+    }
+    for (pid, ids) in others {
+        let recipients = project_recipients(&st.db.pool, pid).await;
+        st.hub.publish(recipients.clone(), "tasks.remove", json!({ "ids": ids }));
+        st.hub.publish(recipients, "tasks.refresh", json!({}));
+    }
     if let Some(pid) = task.parent_id {
         if let Ok(parent) = fetch_task(&st.db.pool, pid).await {
             publish_task(&st, &parent).await;

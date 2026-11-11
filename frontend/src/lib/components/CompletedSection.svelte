@@ -11,6 +11,8 @@
 
   let show = $state(false);
   let tasks = $state([]);
+  // The server caps the list at 200, so the last load may not have returned every match.
+  let truncated = $state(false);
   let purging = $state(false);
   let loading = false;
   let gen = 0; // bumped when the filter changes so stale responses are ignored
@@ -24,6 +26,7 @@
     key;
     show = false;
     tasks = [];
+    truncated = false;
     removed = new Map();
     gen++;
   });
@@ -137,6 +140,7 @@
         const held = removed.get(k) ?? [];
         if (!held.some((h) => h.id === t.id)) removed.set(k, [...held, t]);
       }
+      truncated = rows.length >= 200;
       tasks = rows.filter((t) => !isTaskDeleted(t.id) && !isTaskDeleted(t.parent_id));
     } catch (err) {
       if (myGen === gen) toast(err.message);
@@ -154,7 +158,7 @@
     if (purging || !tasks.length) return;
     const where = scope ? ` ${scope}` : '';
     // The list is capped by the server, so say so when there may be more than are shown.
-    const what = tasks.length >= 200 ? `all completed tasks${where}, including ones not shown here` : tasks.length === 1 ? `the completed task${where}` : `all ${tasks.length} completed tasks${where}`;
+    const what = truncated ? `all completed tasks${where}, including ones not shown here` : tasks.length === 1 ? `the completed task${where}` : `all ${tasks.length} completed tasks${where}`;
     if (!confirm(`Permanently delete ${what}? Their subtasks go too. This cannot be undone.`)) return;
     purging = true;
     const session = mutationSession();
