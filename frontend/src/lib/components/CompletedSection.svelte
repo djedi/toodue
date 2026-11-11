@@ -46,9 +46,14 @@
       const gone = tasks.filter((t) => t.id === id || t.parent_id === id);
       if (gone.length) removed.set(id, gone);
       tasks = tasks.filter((t) => t.id !== id && t.parent_id !== id);
-      // More matches exist past the server's cap: refill so the rest stay reachable.
-      // Rows tombstoned by pending deletes are filtered out of the reload.
-      if (gone.length && truncated && show && !loading) load();
+    };
+    // More matches exist past the server's cap: once the delete has committed, refill so the
+    // rest stay reachable (a reload before the commit would just return the same rows).
+    const onDeleteConfirmed = () => {
+      if (truncated && show) {
+        gen++;
+        load();
+      }
     };
     const onDeleteFailed = (e) => {
       const id = e.detail.id;
@@ -115,6 +120,7 @@
       }
     };
     bus.addEventListener('task-deleted', onDeleted);
+    bus.addEventListener('task-delete-confirmed', onDeleteConfirmed);
     bus.addEventListener('task-delete-failed', onDeleteFailed);
     bus.addEventListener('task-updated', onUpdated);
     bus.addEventListener('server-event', onServerEvent);
@@ -122,6 +128,7 @@
     bus.addEventListener('tasks-refreshed', onRefreshed);
     return () => {
       bus.removeEventListener('task-deleted', onDeleted);
+      bus.removeEventListener('task-delete-confirmed', onDeleteConfirmed);
       bus.removeEventListener('task-delete-failed', onDeleteFailed);
       bus.removeEventListener('task-updated', onUpdated);
       bus.removeEventListener('server-event', onServerEvent);

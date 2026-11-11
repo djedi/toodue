@@ -718,6 +718,8 @@ export async function deleteTask(id, parentId = null) {
   try {
     await api.del(`/tasks/${id}`);
     if (gen !== sessionGen) return;
+    // The server has committed the delete: lists capped server-side can refill now.
+    bus.dispatchEvent(new CustomEvent('task-delete-confirmed', { detail: { id } }));
   } catch (err) {
     if (gen !== sessionGen) throw err;
     if (!mutationOffline(err)) {
