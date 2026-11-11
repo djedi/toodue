@@ -16,6 +16,7 @@
   let purging = $state(false);
   let loading = false;
   let gen = 0; // bumped when the filter changes so stale responses are ignored
+  let loadSeq = 0; // each load gets its own number; only the latest one applies
   // Rows removed optimistically, kept so a failed delete can put them back.
   let removed = new Map();
 
@@ -128,11 +129,13 @@
 
   async function load() {
     const myGen = gen;
+    const mySeq = ++loadSeq;
+    const current = () => myGen === gen && mySeq === loadSeq;
     const query = key;
     loading = true;
     try {
       const rows = await api.get(`/tasks?${query}`);
-      if (myGen !== gen) return;
+      if (!current()) return;
       // Rows deleted while this request was in flight are held back, but kept for rollback.
       for (const t of rows) {
         const k = isTaskDeleted(t.id) ? t.id : isTaskDeleted(t.parent_id) ? t.parent_id : null;
@@ -143,9 +146,9 @@
       truncated = rows.length >= 200;
       tasks = rows.filter((t) => !isTaskDeleted(t.id) && !isTaskDeleted(t.parent_id));
     } catch (err) {
-      if (myGen === gen) toast(err.message);
+      if (current()) toast(err.message);
     } finally {
-      if (myGen === gen) loading = false;
+      if (current()) loading = false;
     }
   }
 
@@ -158,7 +161,7 @@
     if (purging || !tasks.length) return;
     const where = scope ? ` ${scope}` : '';
     // The list is capped by the server, so say so when there may be more than are shown.
-    const what = truncated ? `all completed tasks${where}, including ones not shown here` : tasks.length === 1 ? `the completed task${where}` : `all ${tasks.length} completed tasks${where}`;
+    const what = `all completed tasks${where}` + (truncated ? ', including ones not shown here' : ` (${tasks.length} shown)`);
     if (!confirm(`Permanently delete ${what}? Their subtasks go too. This cannot be undone.`)) return;
     purging = true;
     const session = mutationSession();
