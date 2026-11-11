@@ -470,6 +470,33 @@ async fn collect_subtree(
     Ok(Subtree { descendants, files })
 }
 
+/// Project ids the user is a member of.
+async fn member_projects(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    user_id: i64,
+) -> ApiResult<std::collections::HashSet<i64>> {
+    let rows: Vec<(i64,)> = sqlx::query_as(&*crate::db::sql(
+        "SELECT project_id FROM project_members WHERE user_id = ?",
+    ))
+    .bind(user_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
+
+/// Roots whose subtree reaches a project the user can't access. A subtask moved to another
+/// project keeps its parent, so the cascade would otherwise delete rows the user can't see.
+fn roots_reaching_foreign_projects(
+    descendants: &[(i64, i64, i64)],
+    allowed: &std::collections::HashSet<i64>,
+) -> std::collections::HashSet<i64> {
+    descendants
+        .iter()
+        .filter(|(_, _, pid)| !allowed.contains(pid))
+        .map(|(_, root, _)| *root)
+        .collect()
+}
+
 /// Permanently deletes every completed task matching the filter (and, through the
 /// foreign key cascade, their subtasks). Members of the touched projects get a
 /// `tasks.remove` with the ids and a `tasks.refresh` so subtask counts catch up.
@@ -518,9 +545,17 @@ pub async fn purge_completed(
     let mut files: Vec<(String, i64)> = Vec::new();
     let mut descendants_of: Vec<(i64, i64, i64)> = Vec::new();
     let mut rows: Vec<(i64, i64)> = Vec::new();
+    let allowed = member_projects(&mut tx, user.id).await?;
+    let mut skipped = 0usize;
     for chunk in targets.chunks(500) {
-        let marks = vec!["?"; chunk.len()].join(", ");
         let subtree = collect_subtree(&mut tx, postgres, chunk).await?;
+        let blocked = roots_reaching_foreign_projects(&subtree.descendants, &allowed);
+        skipped += blocked.len();
+        let chunk: Vec<i64> = chunk.iter().copied().filter(|id| !blocked.contains(id)).collect();
+        if chunk.is_empty() {
+            continue;
+        }
+        let marks = vec!["?"; chunk.len()].join(", ");
         files.extend(subtree.files);
         descendants_of.extend(subtree.descendants);
 
@@ -531,7 +566,7 @@ pub async fn purge_completed(
         );
         let delete_sql = crate::db::sql(&delete_sql);
         let mut delete_query = sqlx::query_as::<_, (i64, i64)>(&delete_sql);
-        for id in chunk {
+        for id in &chunk {
             delete_query = delete_query.bind(*id);
         }
         delete_query = delete_query.bind(user.id).bind_all(&binds);
@@ -582,7 +617,7 @@ pub async fn purge_completed(
         st.hub.publish(all_recipients, "tasks.refresh", json!({}));
         crate::gcal::spawn_orphan_cleanup(&st);
     }
-    Ok(Json(json!({ "deleted": ids.len(), "ids": ids })))
+    Ok(Json(json!({ "deleted": ids.len(), "ids": ids, "skipped": skipped })))
 }
 
 #[derive(Deserialize)]
@@ -1056,6 +1091,10 @@ pub async fn remove(
             .await?;
     }
     let subtree = collect_subtree(&mut tx, postgres, &[id]).await?;
+    let allowed = member_projects(&mut tx, user.id).await?;
+    if !roots_reaching_foreign_projects(&subtree.descendants, &allowed).is_empty() {
+        return Err(ApiError::forbidden());
+    }
     sqlx::query(&*crate::db::sql("DELETE FROM tasks WHERE id = ?"))
         .bind(id)
         .execute(&mut *tx)
@@ -1078,7 +1117,16 @@ pub async fn remove(
 
 #[cfg(test)]
 mod tests {
-    use super::next_repeating_due_date;
+    use super::{next_repeating_due_date, roots_reaching_foreign_projects};
+
+    #[test]
+    fn roots_with_subtasks_in_foreign_projects_are_blocked() {
+        let allowed = [1, 2].into_iter().collect();
+        // (id, root, project): root 10 has a subtask in project 3, root 20 stays in 1/2.
+        let descendants = [(11, 10, 1), (12, 10, 3), (21, 20, 2)];
+        let blocked = roots_reaching_foreign_projects(&descendants, &allowed);
+        assert_eq!(blocked, [10].into_iter().collect());
+    }
     use chrono::NaiveDate;
 
     fn date(value: &str) -> NaiveDate {

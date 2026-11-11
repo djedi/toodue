@@ -4,6 +4,7 @@
   import { summarizeScope } from '../oauth.js';
   import { API_BASE, apiUrl, openApiLink } from '../native.js';
   import { data, ui, refresh, refreshTasks, signOut, deleteAccount, toast, markTasksDeleted, mutationSession, sessionValid } from '../state.svelte.js';
+  import { purgeMessage } from '../completed.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import ColorSchemePicker from './ColorSchemePicker.svelte';
   import {
@@ -130,13 +131,7 @@
       const r = await api.del('/tasks/completed');
       if (!sessionValid(session)) return;
       markTasksDeleted(r.ids ?? []);
-      toast(
-        r.deleted === 0
-          ? 'No completed tasks to delete'
-          : r.deleted === 1
-            ? 'Deleted 1 completed task'
-            : `Deleted ${r.deleted} completed tasks`
-      );
+      toast(purgeMessage(r));
       await refreshTasks().catch(() => {});
     } catch (err) {
       if (sessionValid(session)) toast(err.message);

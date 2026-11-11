@@ -1,7 +1,7 @@
 <script>
   import { api } from '../api.js';
   import { bus, toast, isTaskDeleted, refreshTasks, data, mutationSession, sessionValid, markTasksDeleted } from '../state.svelte.js';
-  import { completedQuery, matchesCompletedFilter } from '../completed.js';
+  import { completedQuery, matchesCompletedFilter, purgeMessage } from '../completed.js';
   import TaskItem from './TaskItem.svelte';
   import { Trash2 } from '@lucide/svelte';
 
@@ -153,7 +153,9 @@
   async function purge() {
     if (purging || !tasks.length) return;
     const where = scope ? ` ${scope}` : '';
-    if (!confirm(`Permanently delete ${tasks.length === 1 ? 'the completed task' : 'all completed tasks'}${where}? Their subtasks go too. This cannot be undone.`)) return;
+    // The list is capped by the server, so say so when there may be more than are shown.
+    const what = tasks.length >= 200 ? `all completed tasks${where}, including ones not shown here` : tasks.length === 1 ? `the completed task${where}` : `all ${tasks.length} completed tasks${where}`;
+    if (!confirm(`Permanently delete ${what}? Their subtasks go too. This cannot be undone.`)) return;
     purging = true;
     const session = mutationSession();
     const myGen = gen;
@@ -162,8 +164,11 @@
       if (!sessionValid(session)) return;
       // Tombstone them now so a late edit response can't put one back.
       markTasksDeleted(r.ids ?? []);
-      if (myGen === gen) tasks = [];
-      toast(r.deleted === 1 ? 'Deleted 1 completed task' : `Deleted ${r.deleted} completed tasks`);
+      if (myGen === gen) {
+        const gone = new Set(r.ids ?? []);
+        tasks = tasks.filter((t) => !gone.has(t.id));
+      }
+      toast(purgeMessage(r));
       // Parents of purged subtasks show new counts.
       await refreshTasks().catch(() => {});
     } catch (err) {

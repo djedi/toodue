@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { completedOnDayFilter, completedQuery, matchesCompletedFilter } from './completed.js';
+import { completedOnDayFilter, completedQuery, matchesCompletedFilter, purgeMessage } from './completed.js';
 
 test('completedOnDayFilter spans the whole local day', () => {
   const { completed_from, completed_to } = completedOnDayFilter('2026-10-24');
@@ -37,4 +37,13 @@ test('matchesCompletedFilter applies every bound', () => {
   assert.equal(matchesCompletedFilter(task, { due_from: '2026-10-25' }), true);
   assert.equal(matchesCompletedFilter(task, { due_from: '2026-10-26' }), false);
   assert.equal(matchesCompletedFilter({ ...task, due_date: null }, { due_from: '2026-10-01' }), false);
+});
+
+test('purgeMessage reports deleted and skipped counts', () => {
+  assert.equal(purgeMessage({ deleted: 0 }), 'No completed tasks to delete');
+  assert.equal(purgeMessage({ deleted: 1 }), 'Deleted 1 completed task');
+  assert.equal(
+    purgeMessage({ deleted: 3, skipped: 1 }),
+    "Deleted 3 completed tasks; kept 1 with subtasks in projects you can't access"
+  );
 });

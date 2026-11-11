@@ -40,3 +40,13 @@ export function matchesCompletedFilter(task, filter = {}) {
 export function completedOnLocalDay(iso, dayStr) {
   return !!iso && toDateStr(new Date(iso)) === dayStr;
 }
+
+// Toast text for a DELETE /tasks/completed response.
+export function purgeMessage({ deleted = 0, skipped = 0 } = {}) {
+  let msg =
+    deleted === 0 ? 'No completed tasks to delete' : deleted === 1 ? 'Deleted 1 completed task' : `Deleted ${deleted} completed tasks`;
+  if (skipped > 0) {
+    msg += `; kept ${skipped} with subtasks in projects you can't access`;
+  }
+  return msg;
+}
