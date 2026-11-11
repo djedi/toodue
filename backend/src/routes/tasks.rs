@@ -617,8 +617,11 @@ pub async fn purge_completed(
         st.hub.publish(all_recipients, "tasks.refresh", json!({}));
         crate::gcal::spawn_orphan_cleanup(&st);
     }
-    // `deleted` counts the completed tasks purged; `ids` also lists their cascaded subtasks.
-    Ok(Json(json!({ "deleted": rows.len(), "ids": ids, "skipped": skipped })))
+    // `deleted` counts the matching completed tasks that went, whether deleted directly or by
+    // a parent's cascade; `ids` also lists their incomplete cascaded subtasks.
+    let gone: std::collections::HashSet<i64> = ids.iter().copied().collect();
+    let deleted = targets.iter().filter(|id| gone.contains(id)).count();
+    Ok(Json(json!({ "deleted": deleted, "ids": ids, "skipped": skipped })))
 }
 
 #[derive(Deserialize)]
