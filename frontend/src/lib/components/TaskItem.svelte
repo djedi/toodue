@@ -193,7 +193,7 @@
     if (deleting) return;
     deleting = true;
     try {
-      await deleteTask(task.id); // clears ui.swipedTaskId for this row itself
+      await deleteTask(task.id, task.parent_id); // clears ui.swipedTaskId for this row itself
     } catch (err) {
       deleting = false;
       toast(err.message);

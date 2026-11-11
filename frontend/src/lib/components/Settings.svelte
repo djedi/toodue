@@ -3,7 +3,7 @@
   import { apiKeyCreatedMessage, maskApiKey } from '../apiKeys.js';
   import { summarizeScope } from '../oauth.js';
   import { API_BASE, apiUrl, openApiLink } from '../native.js';
-  import { data, ui, refresh, signOut, deleteAccount, toast } from '../state.svelte.js';
+  import { data, ui, refresh, refreshTasks, signOut, deleteAccount, toast, markTasksDeleted, mutationSession, sessionValid } from '../state.svelte.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import ColorSchemePicker from './ColorSchemePicker.svelte';
   import {
@@ -18,6 +18,7 @@
     KeyRound,
     LogOut,
     Trash2,
+    Eraser,
     Unplug
   } from '@lucide/svelte';
 
@@ -30,6 +31,7 @@
   let apiKeyBusy = $state(false);
   let mcpUrl = $state('');
   let connections = $state([]);
+  let purging = $state(false);
 
   const loadGoogleStatus = () =>
     api.get('/google/status').then((g) => (google = g)).catch(() => {});
@@ -111,6 +113,35 @@
       toast('Google Calendar disconnected');
     } catch (err) {
       toast(err.message);
+    }
+  }
+
+  async function purgeAllCompleted() {
+    if (purging) return;
+    if (
+      !confirm(
+        'Permanently delete every completed task in all of your projects, including shared ones? Their subtasks go too. This cannot be undone.'
+      )
+    )
+      return;
+    purging = true;
+    const session = mutationSession();
+    try {
+      const r = await api.del('/tasks/completed');
+      if (!sessionValid(session)) return;
+      markTasksDeleted(r.ids ?? []);
+      toast(
+        r.deleted === 0
+          ? 'No completed tasks to delete'
+          : r.deleted === 1
+            ? 'Deleted 1 completed task'
+            : `Deleted ${r.deleted} completed tasks`
+      );
+      await refreshTasks().catch(() => {});
+    } catch (err) {
+      if (sessionValid(session)) toast(err.message);
+    } finally {
+      purging = false;
     }
   }
 
@@ -404,6 +435,19 @@
           </ul>
         {/if}
       </div>
+
+      <button onclick={purgeAllCompleted} disabled={purging || data.offline} class="{row} disabled:opacity-50">
+        <Eraser size={18} class="text-zinc-400" />
+        <span class="flex-1">
+          <span class="block text-sm font-medium">
+            {purging ? 'Deleting…' : 'Delete all completed tasks'}
+          </span>
+          <span class="block text-xs text-zinc-400">
+            Permanently remove completed tasks from every project. Each list also has its own "Delete completed".
+          </span>
+        </span>
+        <ChevronRight size={15} class="text-zinc-400" />
+      </button>
 
       <button
         onclick={signOut}

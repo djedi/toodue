@@ -169,7 +169,7 @@
   async function removeTask() {
     if (!confirm('Delete this task?')) return;
     try {
-      await deleteTask(id);
+      await deleteTask(id, task?.parent_id);
     } catch (err) {
       toast(err.message);
     }
