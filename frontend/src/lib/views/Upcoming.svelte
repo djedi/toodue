@@ -1,11 +1,12 @@
 <script>
   import { data, ui, startSelection, endSelection } from '../state.svelte.js';
-  import { todayStr, fullDayLabel, dayLabel, addDays } from '../dates.js';
+  import { fullDayLabel, dayLabel, addDays } from '../dates.js';
+  import { currentDay } from '../today.svelte.js';
   import TaskList from '../components/TaskList.svelte';
   import CompletedSection from '../components/CompletedSection.svelte';
   import { Plus } from '@lucide/svelte';
 
-  const today = $derived(todayStr());
+  const today = $derived(currentDay());
   // Completed tasks that were due on a future day.
   const completedFilter = $derived({ due_from: addDays(today, 1) });
   const upcoming = $derived(

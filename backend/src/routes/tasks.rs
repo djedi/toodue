@@ -547,6 +547,7 @@ pub async fn purge_completed(
     let mut rows: Vec<(i64, i64)> = Vec::new();
     let allowed = member_projects(&mut tx, user.id).await?;
     let mut skipped = 0usize;
+    let mut parent_projects: std::collections::BTreeSet<i64> = Default::default();
     for chunk in targets.chunks(500) {
         let subtree = collect_subtree(&mut tx, postgres, chunk).await?;
         let blocked = roots_reaching_foreign_projects(&subtree.descendants, &allowed);
@@ -556,6 +557,17 @@ pub async fn purge_completed(
             continue;
         }
         let marks = vec!["?"; chunk.len()].join(", ");
+        // Parents may sit in another project; their members need a refresh for subtask counts.
+        let parents_sql = format!(
+            "SELECT DISTINCT p.project_id FROM tasks t JOIN tasks p ON p.id = t.parent_id \
+             WHERE t.id IN ({marks})"
+        );
+        let parents_sql = crate::db::sql(&parents_sql);
+        let mut parents_query = sqlx::query_as::<_, (i64,)>(&parents_sql);
+        for id in &chunk {
+            parents_query = parents_query.bind(*id);
+        }
+        parent_projects.extend(parents_query.fetch_all(&mut *tx).await?.into_iter().map(|r| r.0));
         files.extend(subtree.files);
         descendants_of.extend(subtree.descendants);
 
@@ -611,6 +623,9 @@ pub async fn purge_completed(
             // Identities first so clients tombstone the rows, then a refresh for subtask counts.
             st.hub
                 .publish(recipients, "tasks.remove", json!({ "ids": project_ids }));
+        }
+        for pid in parent_projects {
+            all_recipients.extend(project_recipients(&st.db.pool, pid).await);
         }
         all_recipients.sort_unstable();
         all_recipients.dedup();

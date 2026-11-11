@@ -1,6 +1,7 @@
 <script>
   import { data, ui, updateTask, toast, startSelection, endSelection, mutationSession, sessionValid } from '../state.svelte.js';
-  import { todayStr, fullDayLabel } from '../dates.js';
+  import { fullDayLabel } from '../dates.js';
+  import { currentDay } from '../today.svelte.js';
   import TaskList from '../components/TaskList.svelte';
   import CompletedSection from '../components/CompletedSection.svelte';
   import { completedOnDayFilter } from '../completed.js';
@@ -10,7 +11,7 @@
 
   let rescheduling = $state(false);
 
-  const today = $derived(todayStr());
+  const today = $derived(currentDay());
   // Today's completed section: everything finished today, whatever it was due.
   const completedFilter = $derived(completedOnDayFilter(today));
 
