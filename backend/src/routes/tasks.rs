@@ -617,7 +617,8 @@ pub async fn purge_completed(
         st.hub.publish(all_recipients, "tasks.refresh", json!({}));
         crate::gcal::spawn_orphan_cleanup(&st);
     }
-    Ok(Json(json!({ "deleted": ids.len(), "ids": ids, "skipped": skipped })))
+    // `deleted` counts the completed tasks purged; `ids` also lists their cascaded subtasks.
+    Ok(Json(json!({ "deleted": rows.len(), "ids": ids, "skipped": skipped })))
 }
 
 #[derive(Deserialize)]
