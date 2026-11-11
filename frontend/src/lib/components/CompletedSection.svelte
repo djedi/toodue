@@ -95,7 +95,9 @@
       else if (type === 'project.remove') {
         // The project was deleted or we lost access: none of its tasks may stay visible.
         invalidateLoad();
+        const before = tasks.length;
         tasks = tasks.filter((t) => t.project_id !== d.id);
+        if (tasks.length < before) refillIfTruncated();
         for (const [k, held] of removed) {
           const kept = held.filter((t) => t.project_id !== d.id);
           if (kept.length) removed.set(k, kept);
