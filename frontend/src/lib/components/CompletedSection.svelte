@@ -49,12 +49,14 @@
     };
     // More matches exist past the server's cap: once the delete has committed, refill so the
     // rest stay reachable (a reload before the commit would just return the same rows).
-    const onDeleteConfirmed = () => {
+    // Also used whenever confirmed server state drops a displayed row.
+    const refillIfTruncated = () => {
       if (truncated && show) {
         gen++;
         load();
       }
     };
+    const onDeleteConfirmed = refillIfTruncated;
     const onDeleteFailed = (e) => {
       const id = e.detail.id;
       const gone = removed.get(id);
@@ -77,7 +79,9 @@
         // A parent moved to another project takes its subtasks along on the server; a reopened
         // parent leaves its completed subtasks alone.
         const movedOut = filter.project_id != null && t.project_id !== Number(filter.project_id);
+        const before = tasks.length;
         tasks = tasks.filter((x) => x.id !== t.id && !(movedOut && x.parent_id === t.id));
+        if (tasks.length < before) refillIfTruncated();
       } else if (present) {
         tasks = tasks.map((x) => (x.id === t.id ? t : x));
       } else if (show) {
@@ -104,7 +108,9 @@
       invalidateLoad();
       const gone = new Set(e.detail.ids);
       const isGone = (t) => gone.has(t.id) || gone.has(t.parent_id);
+      const before = tasks.length;
       tasks = tasks.filter((t) => !isGone(t));
+      if (tasks.length < before) refillIfTruncated();
       // A local delete of the same rows that fails later must not restore them either.
       for (const [k, held] of removed) {
         const kept = gone.has(k) ? [] : held.filter((t) => !isGone(t));
