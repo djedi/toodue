@@ -78,7 +78,7 @@ pub async fn upload(
         let stored_name = random_token();
         tokio::fs::write(st.data_dir.join("attachments").join(&stored_name), &data).await?;
 
-        let (id,): (i64,) = sqlx::query_as(&*crate::db::sql(
+        let inserted: Result<(i64,), sqlx::Error> = sqlx::query_as(&*crate::db::sql(
             "INSERT INTO attachments (task_id, user_id, filename, stored_name, mime, size) \
              VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
         ))
@@ -89,7 +89,15 @@ pub async fn upload(
         .bind(&mime)
         .bind(data.len() as i64)
         .fetch_one(&st.db.pool)
-        .await?;
+        .await;
+        let (id,) = match inserted {
+            Ok(row) => row,
+            Err(e) => {
+                // The task may have been deleted while this upload waited: don't orphan the file.
+                let _ = tokio::fs::remove_file(st.data_dir.join("attachments").join(&stored_name)).await;
+                return Err(e.into());
+            }
+        };
 
         let (attachment, _) = fetch_attachment(&st.db.pool, id).await?;
         let recipients = project_recipients(&st.db.pool, task.project_id).await;

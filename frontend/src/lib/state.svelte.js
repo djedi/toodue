@@ -248,6 +248,7 @@ export async function refresh() {
     data.templates = templates;
     data.offline = false;
     saveCurrentSnapshot();
+    bus.dispatchEvent(new CustomEvent('tasks-refreshed'));
   } catch (err) {
     if (isOfflineError(err) && restoreSnapshot()) return;
     throw err;
@@ -258,7 +259,10 @@ export async function refresh() {
 // flight, pending edits re-applied on top of fresh confirmed state, and local deletions hidden.
 function applyServerTasks(tasks) {
   const inflight = data.tasks.filter((t) => pendingCreates.has(t.id));
-  data.tasks = [...tasks.filter((t) => !deletedTaskIds.has(t.id)), ...inflight];
+  data.tasks = [
+    ...tasks.filter((t) => !deletedTaskIds.has(t.id) && !deletedTaskIds.has(t.parent_id)),
+    ...inflight
+  ];
   for (const [id, edit] of taskEdits) {
     const fresh = tasks.find((t) => t.id === id);
     if (fresh) edit.base = fresh;
@@ -271,6 +275,8 @@ export async function refreshTasks() {
     applyServerTasks(await api.get('/tasks'));
     data.offline = false;
     saveCurrentSnapshot();
+    // Views holding their own lists (completed tasks) re-fetch on this.
+    bus.dispatchEvent(new CustomEvent('tasks-refreshed'));
   } catch (err) {
     if (!isOfflineError(err)) throw err;
     markOffline();
@@ -331,6 +337,30 @@ function upsert(list, item) {
   else list.push(item);
 }
 
+// Tasks deleted outside the local mutation pipeline (another client, a purge): tombstone them
+// and their subtasks so no pending edit or late response can bring them back.
+export function markTasksDeleted(ids) {
+  const gone = new Set(ids);
+  if (!gone.size) return;
+  const isGone = (t) => gone.has(t.id) || gone.has(t.parent_id);
+  const tombstone = (id) => {
+    deletedTaskIds.add(id);
+    confirmedDeletedIds.add(id);
+    taskEdits.delete(id);
+  };
+  for (const t of data.tasks) if (isGone(t)) tombstone(t.id);
+  for (const [cid, e] of taskEdits) if (isGone(e.base)) tombstone(cid);
+  for (const id of gone) tombstone(id);
+  unselect([
+    ...gone,
+    ...data.tasks.filter((t) => gone.has(t.parent_id)).map((t) => t.id),
+    ...ui.selectedIds.filter((x) => gone.has(ui.selectedParents[x]))
+  ]);
+  data.tasks = data.tasks.filter((t) => !isGone(t));
+  if (gone.has(ui.openTaskId)) ui.openTaskId = null;
+  bus.dispatchEvent(new CustomEvent('tasks-removed', { detail: { ids: [...gone] } }));
+}
+
 function handleEvent({ type, data: d }) {
   switch (type) {
     case 'task.upsert':
@@ -338,28 +368,11 @@ function handleEvent({ type, data: d }) {
       reconcileTask(d);
       break;
     case 'task.remove':
-      // Another client deleted it: make sure no pending edit here can bring it back.
-      for (const t of data.tasks) {
-        if (t.id === d.id || t.parent_id === d.id) {
-          deletedTaskIds.add(t.id);
-          taskEdits.delete(t.id);
-        }
-      }
-      for (const [cid, e] of taskEdits) {
-        if (e.base.parent_id === d.id) {
-          deletedTaskIds.add(cid);
-          taskEdits.delete(cid);
-        }
-      }
-      deletedTaskIds.add(d.id);
-      taskEdits.delete(d.id);
-      unselect([
-        d.id,
-        ...data.tasks.filter((t) => t.parent_id === d.id).map((t) => t.id),
-        ...ui.selectedIds.filter((x) => ui.selectedParents[x] === d.id)
-      ]);
-      data.tasks = data.tasks.filter((t) => t.id !== d.id && t.parent_id !== d.id);
-      if (ui.openTaskId === d.id) ui.openTaskId = null;
+      markTasksDeleted([d.id]);
+      break;
+    case 'tasks.remove':
+      // A bulk purge elsewhere (or our own, echoed back).
+      markTasksDeleted(d.ids ?? []);
       break;
     case 'tasks.refresh':
       refreshTasks().catch(() => {});
@@ -440,6 +453,9 @@ const createdIds = new Map();
 
 // Ids deleted optimistically (or confirmed deleted); a late edit must not resurrect them.
 const deletedTaskIds = new Set();
+// Subset of the above confirmed gone by the server (another client's delete, a purge): a failed
+// local delete must never restore these.
+const confirmedDeletedIds = new Set();
 
 // Whether a task was deleted locally (pending or confirmed) this session.
 export function isTaskDeleted(id) {
@@ -470,13 +486,18 @@ function resetMutationState() {
   pendingCreates.clear();
   createdIds.clear();
   deletedTaskIds.clear();
+  confirmedDeletedIds.clear();
   taskEdits.clear();
 }
 
 // Server state for a task arrived (event or refresh): it becomes the confirmed base and the
 // pending edits are re-applied on top, so an earlier edit's broadcast can't undo a later one.
 function reconcileTask(t) {
-  if (deletedTaskIds.has(t.id)) return;
+  // A row under a deleted parent went with it on the server, whatever this response says.
+  if (deletedTaskIds.has(t.id) || deletedTaskIds.has(t.parent_id)) return;
+  // A project we no longer have (deleted, or access revoked) shows nothing. A project that is
+  // merely new here arrives with a project.upsert that refetches tasks.
+  if (!data.projects.some((p) => p.id === t.project_id)) return;
   const edit = taskEdits.get(t.id);
   if (edit) {
     edit.base = t;
@@ -598,6 +619,8 @@ export async function updateTask(id, fields) {
     // Not in the main list (e.g. a completed task): nothing to show optimistically.
     const t = await api.patch(`/tasks/${id}`, fields);
     if (gen !== sessionGen) return t;
+    if (deletedTaskIds.has(t.id) || deletedTaskIds.has(t.parent_id)) return t;
+    if (!data.projects.some((p) => p.id === t.project_id)) return t;
     reconcileTask(t);
     saveCurrentSnapshot();
     bus.dispatchEvent(new CustomEvent('task-updated', { detail: t }));
@@ -662,10 +685,17 @@ export async function completeTask(task, completed) {
   }
 }
 
-export async function deleteTask(id) {
+// `parentId` lets callers holding a row the main list doesn't (a completed subtask) say whose
+// cascade it belongs to, so a confirmed parent deletion suppresses this one's rollback.
+export async function deleteTask(id, parentId = null) {
   const gen = sessionGen;
   id = await resolveId(id);
   if (gen !== sessionGen) throw new Error('Signed out');
+  const parent =
+    data.tasks.find((t) => t.id === id)?.parent_id ??
+    taskEdits.get(id)?.base.parent_id ??
+    ui.selectedParents[id] ??
+    parentId;
   // Children hidden by an optimistic completion live only in their edit pipeline; include them.
   const hiddenChildren = [...taskEdits.entries()]
     .filter(([cid, e]) => e.base.parent_id === id && !data.tasks.some((t) => t.id === cid))
@@ -688,14 +718,24 @@ export async function deleteTask(id) {
   try {
     await api.del(`/tasks/${id}`);
     if (gen !== sessionGen) return;
+    // The server has committed the delete: lists capped server-side can refill now.
+    bus.dispatchEvent(new CustomEvent('task-delete-confirmed', { detail: { id } }));
   } catch (err) {
     if (gen !== sessionGen) throw err;
     if (!mutationOffline(err)) {
+      // The server already confirmed it gone (another client, a purge), directly or through its
+      // parent's cascade: nothing to put back.
+      const confirmedGone = (t) => confirmedDeletedIds.has(t.id) || confirmedDeletedIds.has(t.parent_id);
+      if (confirmedDeletedIds.has(id) || confirmedDeletedIds.has(parent)) return;
       // Restore the rows that were removed optimistically, unless a server event replaced them.
       deletedTaskIds.delete(id);
-      for (const t of removed) deletedTaskIds.delete(t.id);
+      for (const t of removed) if (!confirmedGone(t)) deletedTaskIds.delete(t.id);
       const current = new Set(data.tasks.map((t) => t.id));
-      const ids = new Set([id, ...removed.map((t) => t.id)]);
+      const ids = new Set(
+        [id, ...removed.filter((t) => !confirmedGone(t)).map((t) => t.id)].filter(
+          (tid) => !confirmedDeletedIds.has(tid)
+        )
+      );
       for (const tid of ids) {
         if (current.has(tid)) continue;
         // A row with edits in flight comes back from its pipeline (confirmed + pending), not the stale copy.
@@ -710,12 +750,21 @@ export async function deleteTask(id) {
         if (e && !e.pending.length) taskEdits.delete(tid);
       }
       if (wasSelected.length && ui.selecting && ui.selectionGen === selGen) {
-        const back = wasSelected.filter((x) => !ui.selectedIds.includes(x));
+        // Completed children are known only through the selection map; keep them unless they
+        // or their parent are confirmed gone.
+        const back = wasSelected.filter(
+          (x) =>
+            !ui.selectedIds.includes(x) &&
+            !confirmedDeletedIds.has(x) &&
+            !confirmedDeletedIds.has(selectedParents[x] ?? parent)
+        );
         ui.selectedIds = [...ui.selectedIds, ...back];
         for (const x of back) ui.selectedParents[x] = selectedParents[x] ?? null;
       }
       saveCurrentSnapshot();
       bus.dispatchEvent(new CustomEvent('task-delete-failed', { detail: { id } }));
+      // Edits confirmed while the rows were hidden (e.g. a reopened subtask) were dropped; refetch.
+      refreshTasks().catch(() => {});
       throw err;
     }
     queueTaskDelete(id);

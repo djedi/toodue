@@ -1,6 +1,7 @@
 <script>
   import { data, ui, inboxProject, startSelection, endSelection } from '../state.svelte.js';
   import TaskList from '../components/TaskList.svelte';
+  import CompletedSection from '../components/CompletedSection.svelte';
   import { Plus, Inbox } from '@lucide/svelte';
 
   const inbox = $derived(inboxProject());
@@ -40,3 +41,7 @@
   <span class="flex h-5 w-5 items-center justify-center rounded-full text-brand-600"><Plus size={16} /></span>
   Add task
 </button>
+
+{#if inbox}
+  <CompletedSection filter={{ project_id: inbox.id }} scope="in your inbox" />
+{/if}

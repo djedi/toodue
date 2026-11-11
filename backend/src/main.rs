@@ -142,6 +142,7 @@ async fn main() {
             get(routes::tasks::list).post(routes::tasks::create),
         )
         .route("/tasks/search", get(routes::tasks::search))
+        .route("/tasks/completed", delete(routes::tasks::purge_completed))
         .route(
             "/tasks/{id}",
             get(routes::tasks::detail)

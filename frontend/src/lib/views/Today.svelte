@@ -1,14 +1,19 @@
 <script>
   import { data, ui, updateTask, toast, startSelection, endSelection, mutationSession, sessionValid } from '../state.svelte.js';
-  import { todayStr, fullDayLabel } from '../dates.js';
+  import { fullDayLabel } from '../dates.js';
+  import { currentDay } from '../today.svelte.js';
   import TaskList from '../components/TaskList.svelte';
+  import CompletedSection from '../components/CompletedSection.svelte';
+  import { completedOnDayFilter } from '../completed.js';
   import DatePicker from '../components/DatePicker.svelte';
   import { mapLimit } from '../bulk.js';
   import { Plus, PartyPopper, ChevronDown } from '@lucide/svelte';
 
   let rescheduling = $state(false);
 
-  const today = $derived(todayStr());
+  const today = $derived(currentDay());
+  // Today's completed section: everything finished today, whatever it was due.
+  const completedFilter = $derived(completedOnDayFilter(today));
 
   // Move every overdue task to the picked day (or clear the date entirely).
   async function rescheduleOverdue(due_date) {
@@ -91,6 +96,8 @@
   <span class="flex h-5 w-5 items-center justify-center rounded-full text-brand-600"><Plus size={16} /></span>
   Add task
 </button>
+
+<CompletedSection filter={completedFilter} scope="finished today" showProject />
 
 {#if rescheduling}
   <DatePicker
