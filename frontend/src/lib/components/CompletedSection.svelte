@@ -46,6 +46,9 @@
       const gone = tasks.filter((t) => t.id === id || t.parent_id === id);
       if (gone.length) removed.set(id, gone);
       tasks = tasks.filter((t) => t.id !== id && t.parent_id !== id);
+      // More matches exist past the server's cap: refill so the rest stay reachable.
+      // Rows tombstoned by pending deletes are filtered out of the reload.
+      if (gone.length && truncated && show && !loading) load();
     };
     const onDeleteFailed = (e) => {
       const id = e.detail.id;
