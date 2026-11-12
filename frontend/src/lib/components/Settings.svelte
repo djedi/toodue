@@ -7,6 +7,9 @@
   import { purgeMessage } from '../completed.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import ColorSchemePicker from './ColorSchemePicker.svelte';
+  import { DISPLAY_SIZES, readDisplaySize, saveDisplaySize } from '../displaySize.js';
+
+  let displaySize = $state(readDisplaySize());
   import {
     X,
     BookOpen,
@@ -247,6 +250,31 @@
         </div>
         <ColorSchemePicker />
       </div>
+
+      <fieldset class="min-w-0 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <legend class="px-1 text-sm font-medium">Mobile display size</legend>
+        <p id="display-size-help" class="text-xs text-zinc-500 dark:text-zinc-400">Text and spacing on this device only. Applies to mobile web and the native app; desktop stays standard.</p>
+        <div class="mt-3 flex flex-wrap gap-2" aria-describedby="display-size-help">
+          {#each DISPLAY_SIZES as size}
+            <label class="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm has-checked:border-brand-600 has-checked:bg-brand-50 dark:border-zinc-700 dark:has-checked:bg-brand-950">
+              <input
+                id={'display-size-' + size.value}
+                type="radio"
+                name="display-size"
+                value={size.value}
+                checked={displaySize === size.value}
+                onchange={() => (displaySize = saveDisplaySize(size.value))}
+                class="accent-brand-600"
+              />
+              {size.label}
+            </label>
+          {/each}
+        </div>
+        <div class="display-size-preview mt-3 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800" style:--preview-scale={DISPLAY_SIZES.find((size) => size.value === displaySize).scale}>
+          <p class="font-semibold">Plan a calmer day</p>
+          <p class="mt-1 leading-relaxed">Your tasks, notes, and reminders stay easy to read.</p>
+        </div>
+      </fieldset>
 
       {#if google?.configured}
         {#if google.connected}

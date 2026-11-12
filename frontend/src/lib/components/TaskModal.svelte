@@ -18,7 +18,7 @@
   import { repeatOptions } from '../recurrence.js';
   import DatePicker from './DatePicker.svelte';
   import {
-    X,
+    ArrowLeft,
     Check,
     Trash2,
     Paperclip,
@@ -268,7 +268,16 @@
         class="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800"
         style="padding-top: max(0.75rem, env(safe-area-inset-top))"
       >
-        <span class="flex items-center gap-1 text-sm text-zinc-500">
+        <button
+          type="button"
+          aria-label="Back to task list"
+          onclick={close}
+          class="flex min-h-11 flex-none items-center gap-1 rounded-lg px-2 text-sm font-medium text-brand-600 hover:bg-zinc-100 dark:text-brand-400 dark:hover:bg-zinc-800"
+        >
+          <ArrowLeft size={20} aria-hidden="true" />
+          Back
+        </button>
+        <span class="flex min-w-0 items-center gap-1 text-sm text-zinc-500">
           <Hash size={14} />
           {project?.is_inbox ? 'Inbox' : (project?.name ?? '…')}
         </span>
@@ -279,9 +288,6 @@
             class="rounded p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
           >
             <Trash2 size={17} />
-          </button>
-          <button aria-label="Close" onclick={close} class="rounded p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <X size={18} />
           </button>
         </div>
       </div>
