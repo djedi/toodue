@@ -418,6 +418,16 @@ export function projectById(id) {
   return data.projects.find((p) => p.id === id);
 }
 
+// Incomplete tasks (subtasks included, like the server's active_count) per project, from the
+// live task list so counters follow local adds, deletes, completions and moves immediately.
+export function activeCounts() {
+  const counts = new Map();
+  for (const t of data.tasks) {
+    if (!t.completed_at) counts.set(t.project_id, (counts.get(t.project_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /* ---------- actions ---------- */
 
 export async function syncOfflineQueue() {
@@ -555,7 +565,9 @@ export async function addTask(fields) {
   const gen = sessionGen;
   if (fields.parent_id != null) fields = { ...fields, parent_id: await resolveId(fields.parent_id) };
   if (gen !== sessionGen) throw new Error('Signed out');
-  const taskFields = { ...fields, project_id: fields.project_id ?? inboxProject()?.id };
+  // A subtask always lives in its parent's project (the server ignores project_id for it).
+  const parentProject = fields.parent_id != null ? data.tasks.find((t) => t.id === fields.parent_id)?.project_id : null;
+  const taskFields = { ...fields, project_id: parentProject ?? fields.project_id ?? inboxProject()?.id };
   const temp = createOfflineTask(taskFields, { userId: data.user?.id });
   upsert(data.tasks, temp);
   saveCurrentSnapshot();
@@ -653,6 +665,7 @@ export async function updateTask(id, fields) {
       const t = await api.patch(`/tasks/${id}`, fields);
       if (gen !== sessionGen) return t;
       edit.base = t;
+      if (fields.completed === true && t.completed_at) dropCompletedChildren(id);
       settle();
       bus.dispatchEvent(new CustomEvent('task-updated', { detail: t }));
       if (fields.completed === true && (existing.repeat_rule || t.repeat_rule)) {
@@ -668,6 +681,7 @@ export async function updateTask(id, fields) {
       // Queued for sync: treat it as applied to the confirmed state so it stays visible.
       edit.base = applyLocalTaskPatch(edit.base, fields);
       if (!deletedTaskIds.has(id)) queueTaskPatch(id, fields); // a queued delete would 404 it
+      if (fields.completed === true) dropCompletedChildren(id);
       settle();
       offlineToast();
       return edit.base;
@@ -676,6 +690,12 @@ export async function updateTask(id, fields) {
   const result = edit.chain.catch(() => {}).then(run);
   edit.chain = result;
   return result;
+}
+
+// Completing a parent completes its open subtasks on the server; mirror that locally so lists and
+// counters don't wait on (or, with the event stream down, never get) the children's events.
+function dropCompletedChildren(parentId) {
+  data.tasks = data.tasks.filter((x) => x.parent_id !== parentId || taskEdits.has(x.id));
 }
 
 export async function completeTask(task, completed) {

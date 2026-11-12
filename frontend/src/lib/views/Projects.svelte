@@ -1,5 +1,5 @@
 <script>
-  import { data, navigate, addProject, reorderProjects, shareProjects, toast, importTemplate } from '../state.svelte.js';
+  import { data, navigate, addProject, reorderProjects, shareProjects, toast, importTemplate, activeCounts } from '../state.svelte.js';
   import { bulkShareMessage } from '../bulkShare.js';
   import { Hash, Plus, Users, ChevronRight, GripVertical, UserPlus, X, ClipboardList } from '@lucide/svelte';
 
@@ -7,6 +7,7 @@
 
   // Depth-first flattening of the project tree. Projects whose parent isn't
   // visible (e.g. a shared child of an unshared parent) render as roots.
+  const counts = $derived(activeCounts());
   const rows = $derived.by(() => {
     const list = data.projects.filter((p) => !p.is_inbox);
     const ids = new Set(list.map((p) => p.id));
@@ -400,8 +401,8 @@
         {#if row.p.members?.length > 1}
           <Users size={14} class="flex-none text-zinc-400" />
         {/if}
-        {#if row.p.active_count}
-          <span class="text-xs text-zinc-400">{row.p.active_count}</span>
+        {#if counts.get(row.p.id)}
+          <span class="text-xs text-zinc-400">{counts.get(row.p.id)}</span>
         {/if}
         <ChevronRight size={16} class="text-zinc-300 dark:text-zinc-600" />
       </button>

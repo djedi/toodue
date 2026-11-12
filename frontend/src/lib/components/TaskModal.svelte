@@ -197,7 +197,7 @@
     e.preventDefault();
     if (!newSubtask.trim()) return;
     try {
-      await addTask({ parent_id: id, name: newSubtask });
+      await addTask({ parent_id: id, project_id: task?.project_id, name: newSubtask });
       newSubtask = '';
       await load();
     } catch (err) {

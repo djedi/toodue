@@ -1,5 +1,5 @@
 <script>
-  import { data, ui, navigate, inboxProject, addProject, toast } from '../state.svelte.js';
+  import { data, ui, navigate, inboxProject, addProject, toast, activeCounts } from '../state.svelte.js';
   import { todayStr } from '../dates.js';
   import { getQuickAddDefaults } from '../quickAdd.js';
   import BrandLogo from './BrandLogo.svelte';
@@ -21,6 +21,7 @@
   const todayCount = $derived(
     data.tasks.filter((t) => t.due_date && t.due_date <= todayStr() && !t.completed_at).length
   );
+  const counts = $derived(activeCounts());
   const rootProjects = $derived(
     data.projects.filter((p) => !p.is_inbox && !p.parent_id)
   );
@@ -65,8 +66,8 @@
     {#if project.members?.length > 1}
       <Users size={13} class="flex-none opacity-50" />
     {/if}
-    {#if project.active_count}
-      <span class="text-xs text-zinc-400">{project.active_count}</span>
+    {#if counts.get(project.id)}
+      <span class="text-xs text-zinc-400">{counts.get(project.id)}</span>
     {/if}
   </button>
   {#each children(project.id) as child (child.id)}
