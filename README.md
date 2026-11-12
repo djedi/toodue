@@ -72,6 +72,22 @@ disable response buffering for `/api/events` if your proxy buffers by default).
 | `STATIC_DIR` | `./static`    | Built frontend to serve        |
 | `RUST_LOG`   | `toodue=info` | Log filter                     |
 | `PUBLIC_URL` | (from request)| Public origin, used for OAuth/MCP metadata and Google sync |
+| `REPORTS_WEBHOOK_URL` | (unset) | Optional Slack-compatible webhook that receives new content reports |
+
+## Moderation
+
+Members of shared projects can report comments, tasks, attachments and people, and can block
+other users (App Store Guideline 1.2). Blocking removes the blocked person from projects you own,
+removes you from projects they own, prevents either of you sharing projects with the other, and
+hides their comments from you. Reports are stored in `content_reports` with a snapshot of the
+reported content, logged at `warn`, and posted to `REPORTS_WEBHOOK_URL` when set. Review open ones
+with:
+
+```sh
+docker exec toodue-db psql -U toodue toodue -c \
+  "SELECT id, created_at, kind, target_id, reason, reported_user_id, reporter_email, snapshot, details \
+   FROM content_reports WHERE status = 'open' ORDER BY id"
+```
 
 ## Calendar integration
 

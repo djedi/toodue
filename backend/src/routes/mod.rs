@@ -3,6 +3,7 @@ pub mod api_keys;
 pub mod attachments;
 pub mod comments;
 pub mod import;
+pub mod moderation;
 pub mod projects;
 pub mod tasks;
 pub mod templates;

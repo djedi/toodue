@@ -3,10 +3,13 @@
   import { apiKeyCreatedMessage, maskApiKey } from '../apiKeys.js';
   import { summarizeScope } from '../oauth.js';
   import { API_BASE, apiUrl, openApiLink } from '../native.js';
-  import { data, ui, refresh, refreshTasks, signOut, deleteAccount, toast, markTasksDeleted, mutationSession, sessionValid } from '../state.svelte.js';
+  import { data, ui, refresh, refreshTasks, signOut, deleteAccount, listBlockedUsers, unblockUser, toast, markTasksDeleted, mutationSession, sessionValid } from '../state.svelte.js';
   import { purgeMessage } from '../completed.js';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import ColorSchemePicker from './ColorSchemePicker.svelte';
+  import { DISPLAY_SIZES, readDisplaySize, saveDisplaySize } from '../displaySize.js';
+
+  let displaySize = $state(readDisplaySize());
   import {
     X,
     BookOpen,
@@ -20,7 +23,9 @@
     LogOut,
     Trash2,
     Eraser,
-    Unplug
+    Unplug,
+    UserX,
+    LifeBuoy
   } from '@lucide/svelte';
 
   let importInput = $state(null);
@@ -33,6 +38,7 @@
   let mcpUrl = $state('');
   let connections = $state([]);
   let purging = $state(false);
+  let blocked = $state([]);
 
   const loadGoogleStatus = () =>
     api.get('/google/status').then((g) => (google = g)).catch(() => {});
@@ -49,7 +55,18 @@
     api.get('/api-keys').then((keys) => (apiKeys = keys)).catch(() => {});
     api.get('/mcp/info').then((r) => (mcpUrl = r.mcp_url)).catch(() => {});
     api.get('/oauth/connections').then((c) => (connections = c)).catch(() => {});
+    listBlockedUsers().then((b) => (blocked = b)).catch(() => {});
   });
+
+  async function unblock(person) {
+    try {
+      await unblockUser(person.id);
+      blocked = blocked.filter((b) => b.id !== person.id);
+      toast(`Unblocked ${person.name}`);
+    } catch (err) {
+      toast(err.message);
+    }
+  }
 
   async function copyMcpUrl() {
     if (!mcpUrl) return;
@@ -248,6 +265,31 @@
         <ColorSchemePicker />
       </div>
 
+      <fieldset class="min-w-0 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <legend class="px-1 text-sm font-medium">Mobile display size</legend>
+        <p id="display-size-help" class="text-xs text-zinc-500 dark:text-zinc-400">Text and spacing on this device only. Applies to mobile web and the native app; desktop stays standard.</p>
+        <div class="mt-3 flex flex-wrap gap-2" aria-describedby="display-size-help">
+          {#each DISPLAY_SIZES as size}
+            <label class="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm has-checked:border-brand-600 has-checked:bg-brand-50 dark:border-zinc-700 dark:has-checked:bg-brand-950">
+              <input
+                id={'display-size-' + size.value}
+                type="radio"
+                name="display-size"
+                value={size.value}
+                checked={displaySize === size.value}
+                onchange={() => (displaySize = saveDisplaySize(size.value))}
+                class="accent-brand-600"
+              />
+              {size.label}
+            </label>
+          {/each}
+        </div>
+        <div class="display-size-preview mt-3 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800" style:--preview-scale={DISPLAY_SIZES.find((size) => size.value === displaySize).scale}>
+          <p class="font-semibold">Plan a calmer day</p>
+          <p class="mt-1 leading-relaxed">Your tasks, notes, and reminders stay easy to read.</p>
+        </div>
+      </fieldset>
+
       {#if google?.configured}
         {#if google.connected}
           <div class={row}>
@@ -429,6 +471,44 @@
             {/each}
           </ul>
         {/if}
+      </div>
+
+      <div class="rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div class="flex items-start gap-3">
+          <UserX size={18} class="mt-0.5 flex-none text-zinc-400" />
+          <div class="min-w-0 flex-1">
+            <span class="block text-sm font-medium">Blocked people</span>
+            <span class="block text-xs text-zinc-400">
+              Block someone from a comment or a project's member list. They can't share projects with you and you won't see their comments.
+            </span>
+          </div>
+        </div>
+        {#if blocked.length}
+          <ul class="mt-2 space-y-1">
+            {#each blocked as person (person.id)}
+              <li class="flex items-center gap-2 py-1">
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-sm font-medium">{person.name}</div>
+                  <div class="truncate text-xs text-zinc-400">{person.email}</div>
+                </div>
+                <button type="button" onclick={() => unblock(person)} class="text-xs font-medium text-brand-600 hover:underline">
+                  Unblock
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="mt-2 text-xs text-zinc-400">You haven't blocked anyone.</p>
+        {/if}
+      </div>
+
+      <div class="flex items-center gap-3 rounded-xl border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800">
+        <LifeBuoy size={18} class="flex-none text-zinc-400" />
+        <span class="flex flex-1 flex-wrap gap-x-4 gap-y-1">
+          <a href="https://toodue.com/support" target="_blank" rel="noopener noreferrer" class="font-medium text-brand-600 hover:underline">Help &amp; support</a>
+          <a href="https://toodue.com/terms" target="_blank" rel="noopener noreferrer" class="text-zinc-500 hover:underline">Terms</a>
+          <a href="https://toodue.com/privacy" target="_blank" rel="noopener noreferrer" class="text-zinc-500 hover:underline">Privacy</a>
+        </span>
       </div>
 
       <button onclick={purgeAllCompleted} disabled={purging || data.offline} class="{row} disabled:opacity-50">

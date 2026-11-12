@@ -148,8 +148,25 @@ body {
   input,
   textarea,
   select {
-    font-size: 16px !important;
+    font-size: max(16px, 1rem) !important;
   }
+}
+
+/* Tailwind 4's --text-* theme tokens already use rem (not px), so changing
+ * the root scales utility text AND spacing without zoom or token duplication.
+ * Percentages also preserve the browser/user's default text size. */
+html[data-display-size='large'] { --mobile-font-size: 112.5%; }
+html[data-display-size='extra-large'] { --mobile-font-size: 125%; }
+html[data-native='true'] { font-size: var(--mobile-font-size, 100%); }
+html[data-native='true'] body { overflow-wrap: anywhere; }
+html[data-native='true'] :is(input, textarea, select) { font-size: max(16px, 1rem) !important; }
+.display-size-preview { font-size: calc(1rem * var(--preview-scale, 1)); overflow-wrap: anywhere; }
+html[data-native='true'] .display-size-preview { font-size: 1rem; }
+
+@media (max-width: 767px) {
+  html { font-size: var(--mobile-font-size, 100%); }
+  body { overflow-wrap: anywhere; }
+  .display-size-preview { font-size: 1rem; }
 }
 
 /* Native date/time inputs inherit the theme. */

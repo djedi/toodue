@@ -47,8 +47,13 @@ pub async fn create(
     .await?;
 
     let recipients = project_recipients(&st.db.pool, task.project_id).await;
+    let blockers = crate::routes::moderation::blockers_of(&st.db.pool, user.id).await;
     st.hub.publish(
-        recipients.clone(),
+        recipients
+            .iter()
+            .copied()
+            .filter(|r| !blockers.contains(r))
+            .collect(),
         "comment.new",
         serde_json::to_value(&comment).unwrap(),
     );

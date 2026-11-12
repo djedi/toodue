@@ -174,3 +174,28 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_oauth_grants_user ON oauth_grants(user_id);
 CREATE INDEX IF NOT EXISTS idx_oauth_tokens_grant ON oauth_tokens(grant_id);
+
+CREATE TABLE IF NOT EXISTS user_blocks (
+  blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (blocker_id, blocked_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_id);
+
+-- Reports keep a snapshot of the reported content and no foreign keys, so they
+-- survive deletion of the content or of either account for moderation.
+CREATE TABLE IF NOT EXISTS content_reports (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporter_id      INTEGER NOT NULL,
+  reporter_email   TEXT NOT NULL,
+  reported_user_id INTEGER,
+  kind             TEXT NOT NULL,
+  target_id        INTEGER NOT NULL,
+  reason           TEXT NOT NULL,
+  details          TEXT NOT NULL DEFAULT '',
+  snapshot         TEXT NOT NULL DEFAULT '',
+  status           TEXT NOT NULL DEFAULT 'open',
+  created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
