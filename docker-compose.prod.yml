@@ -15,6 +15,7 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      REPORTS_WEBHOOK_URL: ${REPORTS_WEBHOOK_URL:-}
     volumes:
       - toodue-data:/data
     ports:

@@ -387,21 +387,25 @@ function handleEvent({ type, data: d }) {
       break;
     }
     case 'project.remove':
-      data.projects = data.projects.filter((p) => p.id !== d.id);
-      // Pending edits on the project's tasks must not bring them back.
-      for (const t of data.tasks) if (t.project_id === d.id) deletedTaskIds.add(t.id);
-      for (const [tid, e] of taskEdits) {
-        if (e.base.project_id === d.id) {
-          deletedTaskIds.add(tid);
-          taskEdits.delete(tid);
-        }
-      }
-      unselect(data.tasks.filter((t) => t.project_id === d.id).map((t) => t.id));
-      data.tasks = data.tasks.filter((t) => t.project_id !== d.id);
-      if (ui.view === 'project' && ui.projectId === d.id) navigate('projects');
+      dropProjectLocally(d.id);
       break;
   }
   saveCurrentSnapshot();
+}
+
+function dropProjectLocally(id) {
+  data.projects = data.projects.filter((p) => p.id !== id);
+  // Pending edits on the project's tasks must not bring them back.
+  for (const t of data.tasks) if (t.project_id === id) deletedTaskIds.add(t.id);
+  for (const [tid, e] of taskEdits) {
+    if (e.base.project_id === id) {
+      deletedTaskIds.add(tid);
+      taskEdits.delete(tid);
+    }
+  }
+  unselect(data.tasks.filter((t) => t.project_id === id).map((t) => t.id));
+  data.tasks = data.tasks.filter((t) => t.project_id !== id);
+  if (ui.view === 'project' && ui.projectId === id) navigate('projects');
 }
 
 /* ---------- selectors ---------- */
@@ -896,6 +900,37 @@ export async function removeMember(projectId, userId) {
     upsert(data.projects, p);
   }
   saveCurrentSnapshot();
+}
+
+export async function reportContent(kind, targetId, reason, details = '') {
+  if (!requireOnlineAction()) throw new Error('Connection required');
+  return api.post('/reports', { kind, target_id: targetId, reason, details });
+}
+
+export async function blockUser(userId) {
+  if (!requireOnlineAction()) throw new Error('Connection required');
+  const session = mutationSession();
+  const res = await api.post('/blocks', { user_id: userId });
+  const removed = new Set(res.removed_projects ?? []);
+  if (removed.size && sessionValid(session) && data.user) {
+    // Projects the blocked person owns are gone for us; ours just lose a member.
+    for (const p of [...data.projects]) {
+      if (!removed.has(p.id)) continue;
+      if (p.owner_id === data.user.id) p.members = (p.members ?? []).filter((m) => m.id !== userId);
+      else dropProjectLocally(p.id);
+    }
+    saveCurrentSnapshot();
+  }
+  return res;
+}
+
+export function listBlockedUsers() {
+  return api.get('/blocks');
+}
+
+export async function unblockUser(userId) {
+  if (!requireOnlineAction()) throw new Error('Connection required');
+  return api.del(`/blocks/${userId}`);
 }
 
 export async function deleteAccount(password) {

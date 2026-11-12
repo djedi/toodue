@@ -691,9 +691,12 @@ pub async fn detail(
 
     let comments = sqlx::query_as::<_, Comment>(&*crate::db::sql(
         "SELECT c.id, c.task_id, c.user_id, u.name AS user_name, c.body, c.created_at \
-         FROM comments c JOIN users u ON u.id = c.user_id WHERE c.task_id = ? ORDER BY c.created_at",
+         FROM comments c JOIN users u ON u.id = c.user_id WHERE c.task_id = ? \
+         AND c.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = ?) \
+         ORDER BY c.created_at",
     ))
     .bind(id)
+    .bind(user.id)
     .fetch_all(&st.db.pool)
     .await?;
 

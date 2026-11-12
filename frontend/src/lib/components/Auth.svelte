@@ -11,6 +11,7 @@
   let password = $state('');
   let error = $state('');
   let busy = $state(false);
+  let agreed = $state(false);
 
   async function submit(e) {
     e.preventDefault();
@@ -72,6 +73,18 @@
           minlength="8"
           class="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-zinc-700"
         />
+        {#if mode === 'register'}
+          <label class="flex items-start gap-2.5 text-xs text-zinc-500">
+            <input type="checkbox" bind:checked={agreed} required class="mt-0.5 accent-brand-600" />
+            <span>
+              I agree to the
+              <a href="https://toodue.com/terms" target="_blank" rel="noopener noreferrer" class="font-medium text-brand-600 hover:underline">Terms of Service</a>
+              and
+              <a href="https://toodue.com/privacy" target="_blank" rel="noopener noreferrer" class="font-medium text-brand-600 hover:underline">Privacy Policy</a>.
+              There's no tolerance for objectionable content or abusive users.
+            </span>
+          </label>
+        {/if}
         {#if error}
           <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
         {/if}
@@ -96,6 +109,13 @@
       >
         {mode === 'login' ? 'Sign up' : 'Log in'}
       </button>
+    </p>
+    <p class="mt-6 text-center text-xs text-zinc-400">
+      <a href="https://toodue.com/support" target="_blank" rel="noopener noreferrer" class="hover:underline">Support</a>
+      ·
+      <a href="https://toodue.com/terms" target="_blank" rel="noopener noreferrer" class="hover:underline">Terms</a>
+      ·
+      <a href="https://toodue.com/privacy" target="_blank" rel="noopener noreferrer" class="hover:underline">Privacy</a>
     </p>
   </div>
 </div>

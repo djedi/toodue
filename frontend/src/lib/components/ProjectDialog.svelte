@@ -8,12 +8,14 @@
     toast
   } from '../state.svelte.js';
   import { X, UserPlus, Trash2 } from '@lucide/svelte';
+  import ReportDialog from './ReportDialog.svelte';
 
   let { project, onclose } = $props();
 
   let name = $state(project.name);
   let email = $state('');
   let busy = $state(false);
+  let reporting = $state(null);
 
   const isOwner = $derived(project.owner_id === data.user.id);
 
@@ -85,7 +87,7 @@
   }
 
   function onkeydown(e) {
-    if (e.key === 'Escape') onclose();
+    if (e.key === 'Escape' && !reporting) onclose();
   }
 </script>
 
@@ -142,6 +144,20 @@
               </span>
               <span class="block truncate text-xs text-zinc-400">{member.email}</span>
             </div>
+            {#if member.id !== data.user.id}
+              <button
+                onclick={() => (reporting = { kind: 'user', targetId: member.id, userId: member.id, userName: member.name })}
+                class="text-xs text-zinc-400 hover:text-zinc-600"
+              >
+                Report
+              </button>
+              <button
+                onclick={() => (reporting = { kind: null, targetId: null, userId: member.id, userName: member.name })}
+                class="text-xs text-zinc-400 hover:text-red-600"
+              >
+                Block
+              </button>
+            {/if}
             {#if member.role === 'owner'}
               <span class="text-[11px] font-medium text-zinc-400 uppercase">Owner</span>
             {:else if isOwner || member.id === data.user.id}
@@ -187,3 +203,13 @@
     {/if}
   </div>
 </div>
+
+{#if reporting}
+  <ReportDialog
+    {...reporting}
+    onclose={() => (reporting = null)}
+    ondone={({ blocked }) => {
+      if (blocked && !data.projects.some((p) => p.id === project.id)) onclose();
+    }}
+  />
+{/if}
