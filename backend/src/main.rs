@@ -150,6 +150,12 @@ async fn main() {
                 .delete(routes::tasks::remove),
         )
         .route("/tasks/{id}/comments", post(routes::comments::create))
+        .route("/reports", post(routes::moderation::report))
+        .route(
+            "/blocks",
+            get(routes::moderation::list_blocks).post(routes::moderation::block),
+        )
+        .route("/blocks/{user_id}", delete(routes::moderation::unblock))
         .route("/comments/{id}", delete(routes::comments::remove))
         .route(
             "/tasks/{id}/attachments",

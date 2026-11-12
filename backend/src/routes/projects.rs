@@ -369,6 +369,13 @@ pub async fn share(
     let (target_id,) = target.ok_or_else(|| {
         ApiError::bad_request("no TooDue account with that email — ask them to sign up first")
     })?;
+    if crate::routes::moderation::blocked_between(&st.db.pool, user.id, target_id).await?
+        || crate::routes::moderation::blocked_from_project(&st.db.pool, id, target_id).await?
+    {
+        return Err(ApiError::bad_request(
+            "you can't share projects with that person",
+        ));
+    }
 
     sqlx::query(st.db.sql(
         "INSERT OR IGNORE INTO project_members (project_id, user_id, role) VALUES (?, ?, 'member')",
@@ -413,6 +420,11 @@ pub async fn share_bulk(
     let (target_id,) = target.ok_or_else(|| {
         ApiError::bad_request("no TooDue account with that email — ask them to sign up first")
     })?;
+    if crate::routes::moderation::blocked_between(&st.db.pool, user.id, target_id).await? {
+        return Err(ApiError::bad_request(
+            "you can't share projects with that person",
+        ));
+    }
 
     let mut shared = Vec::new();
     let mut already_shared = Vec::new();
@@ -443,6 +455,14 @@ pub async fn share_bulk(
             skipped.push(BulkShareSkip {
                 id,
                 reason: "you don't have access to that project".into(),
+            });
+            continue;
+        }
+
+        if crate::routes::moderation::blocked_from_project(&st.db.pool, id, target_id).await? {
+            skipped.push(BulkShareSkip {
+                id,
+                reason: "that person can't be added to this project".into(),
             });
             continue;
         }

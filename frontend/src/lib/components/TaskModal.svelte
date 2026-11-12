@@ -17,6 +17,7 @@
   import { fmtTimestamp, fmtTime, dayLabel, todayStr } from '../dates.js';
   import { repeatOptions } from '../recurrence.js';
   import DatePicker from './DatePicker.svelte';
+  import ReportDialog from './ReportDialog.svelte';
   import {
     ArrowLeft,
     Check,
@@ -28,7 +29,8 @@
     Flag,
     Repeat2,
     Download,
-    Hash
+    Hash,
+    ShieldAlert
   } from '@lucide/svelte';
 
   let { id } = $props();
@@ -40,11 +42,27 @@
   let newComment = $state('');
   let fileInput = $state(null);
   let pickerFor = $state(null); // 'due' | 'deadline'
+  let reporting = $state(null); // { kind, targetId, userId, userName } for ReportDialog
   let loadGen = 0; // stale detail responses are dropped
   let pendingSaves = 0; // while > 0, keep the optimistic task over server copies
 
   const task = $derived(detail?.task);
   const project = $derived(task ? projectById(task.project_id) : null);
+
+  function memberName(userId) {
+    return project?.members?.find((m) => m.id === userId)?.name ?? 'this person';
+  }
+
+  function report(kind, targetId, userId, userName = memberName(userId)) {
+    reporting = { kind, targetId, userId, userName };
+  }
+
+  async function afterReport({ blocked }) {
+    if (!blocked) return;
+    // Blocking may have removed us from this task's project.
+    if (task && !projectById(task.project_id)) close();
+    else await load();
+  }
 
   async function load() {
     // Show what we already know about the task while the detail request is in flight.
@@ -119,7 +137,7 @@
   }
 
   function onkeydown(e) {
-    if (e.key === 'Escape' && !pickerFor) close();
+    if (e.key === 'Escape' && !pickerFor && !reporting) close();
   }
 
   async function save(fields) {
@@ -282,6 +300,16 @@
           {project?.is_inbox ? 'Inbox' : (project?.name ?? '…')}
         </span>
         <div class="ml-auto flex items-center gap-1">
+          {#if task}
+            <button
+              aria-label="Report task"
+              title="Report task"
+              onclick={() => report('task', task.id, task.creator_id)}
+              class="rounded p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+            >
+              <ShieldAlert size={17} />
+            </button>
+          {/if}
           <button
             aria-label="Delete task"
             onclick={removeTask}
@@ -437,6 +465,11 @@
                   <a href={apiUrl(`/attachments/${att.id}`)} onclick={(e) => openApiLink(e, `/attachments/${att.id}`, api.post).catch((err) => toast(err.message))} download aria-label="Download" class="p-1 text-zinc-400 hover:text-brand-600">
                     <Download size={14} />
                   </a>
+                  {#if att.user_id !== data.user.id}
+                    <button aria-label="Report attachment" onclick={() => report('attachment', att.id, att.user_id)} class="p-1 text-zinc-400 hover:text-zinc-600">
+                      <ShieldAlert size={14} />
+                    </button>
+                  {/if}
                   <button aria-label="Delete attachment" onclick={() => deleteAttachment(att.id)} class="p-1 text-zinc-400 hover:text-red-600">
                     <Trash2 size={14} />
                   </button>
@@ -466,6 +499,21 @@
                       >
                         Delete
                       </button>
+                    {:else}
+                      <span class="ml-auto flex gap-2.5">
+                        <button
+                          onclick={() => report('comment', c.id, c.user_id, c.user_name)}
+                          class="text-[11px] text-zinc-400 hover:text-zinc-600"
+                        >
+                          Report
+                        </button>
+                        <button
+                          onclick={() => report(null, null, c.user_id, c.user_name)}
+                          class="text-[11px] text-zinc-400 hover:text-red-600"
+                        >
+                          Block
+                        </button>
+                      </span>
                     {/if}
                   </div>
                   <p class="text-sm whitespace-pre-wrap">{c.body}</p>
@@ -515,4 +563,8 @@
     onselect={(deadline) => save({ deadline })}
     onclose={() => (pickerFor = null)}
   />
+{/if}
+
+{#if reporting}
+  <ReportDialog {...reporting} onclose={() => (reporting = null)} ondone={afterReport} />
 {/if}
